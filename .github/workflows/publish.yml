@@ -1,0 +1,48 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:  # 手动触发
+
+permissions:
+  id-token: write  # OIDC Trusted Publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Build all packages
+        run: |
+          uv build --package pi-py-ai
+          uv build --package pi-py-agent-core
+          uv build --package pi-py-storage-sqlite
+          uv build --package pi-py-coding-agent
+          uv build --package pi-py-server
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # skip-existing: 跳过 PyPI 上已存在的同名文件，便于失败重试时
+        # 只补传缺失的包（如 PyPI 对短时间创建多个新项目的限流 429）。
+        # 两种认证方式，任选其一：
+        #
+        # 方式 A — OIDC Trusted Publishing（推荐，无需 token）
+        #   在 PyPI 网页为每个包添加 pending publisher：
+        #     Owner: encyc  Repo: pi-py  Workflow: publish.yml
+        #   配好后去掉下面 with.password 这行即可自动 OIDC 认证
+        #
+        # 方式 B — PyPI API token（如果无法登录 PyPI 网页配置 OIDC）
+        #   生成一个 PyPI token（对所有项目有效），然后用：
+        #     gh secret set PYPI_API_TOKEN --repo encyc/pi-py
+        #   保留下面这行即可
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
