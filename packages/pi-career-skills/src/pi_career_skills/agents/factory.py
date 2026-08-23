@@ -12,6 +12,8 @@ controller owns them (including the shared EvidenceStore).
 
 from __future__ import annotations
 
+from typing import Any
+
 from pi_agent_core import Agent, AgentOptions, AgentState
 from pi_ai import Model
 
@@ -40,30 +42,86 @@ _SUPERVISOR_SKILLS: tuple[str, ...] = ("job-discovery", "job-matching", "resume-
 _REGISTRY = build_career_tool_registry()
 
 
-def build_supervisor_agent(model: Model, runner: DelegationRunner) -> Agent:
-    """Build the supervisor agent with exactly the three delegation tools."""
+def build_supervisor_agent(
+    model: Model,
+    runner: DelegationRunner | dict[str, DelegationRunner],
+    *,
+    allowed_skills: tuple[str, ...] | None = None,
+    registry: Any = None,
+    stream_fn: Any = None,
+    get_api_key: Any = None,
+    before_tool_call: Any = None,
+    after_tool_call: Any = None,
+    should_stop_after_turn: Any = None,
+) -> Agent:
+    """Build the supervisor agent with delegation tools for allowed skills.
+
+    When ``allowed_skills`` is ``None`` (default), all three skills are
+    exposed — identical to the historical behavior.  Otherwise only the
+    skills present in *both* ``allowed_skills`` and ``_SUPERVISOR_SKILLS``
+    are included, preserving ``_SUPERVISOR_SKILLS`` order.
+
+    ``runner`` can be either a single ``DelegationRunner`` used for every
+    skill (backward-compatible) or a ``{skill: runner}`` mapping for
+    per-skill runners (useful when each delegation needs its own closure).
+
+    All hook kwargs are optional and default to ``None`` (same as before).
+    ``registry`` is unused for the supervisor (it only sees delegation tools);
+    the parameter is accepted for call-site symmetry with ``build_skill_agent``.
+    """
+    if allowed_skills is None:
+        skills = list(_SUPERVISOR_SKILLS)
+    else:
+        allowed_set = set(allowed_skills)
+        skills = [s for s in _SUPERVISOR_SKILLS if s in allowed_set]
+
+    if isinstance(runner, dict):
+        tools = [make_delegation_tool(s, runner[s]) for s in skills]
+    else:
+        tools = [make_delegation_tool(s, runner) for s in skills]
+
     return Agent(
         AgentOptions(
             initial_state=AgentState(
                 system_prompt=SUPERVISOR_PROMPT,
                 model=model,
-                tools=[make_delegation_tool(s, runner) for s in _SUPERVISOR_SKILLS],
+                tools=tools,
             ),
             tool_execution="sequential",
+            stream_fn=stream_fn,
+            get_api_key=get_api_key,
+            before_tool_call=before_tool_call,
+            after_tool_call=after_tool_call,
+            should_stop_after_turn=should_stop_after_turn,
         )
     )
 
 
-def build_skill_agent(skill_name: str, model: Model, context: ToolContext) -> Agent:
+def build_skill_agent(
+    skill_name: str,
+    model: Model,
+    context: ToolContext,
+    *,
+    registry: Any = None,
+    stream_fn: Any = None,
+    get_api_key: Any = None,
+    before_tool_call: Any = None,
+    after_tool_call: Any = None,
+    should_stop_after_turn: Any = None,
+) -> Agent:
     """Build a fresh skill agent scoped to *skill_name*'s own tools only.
+
+    When ``registry`` is given, catalog names are resolved from it instead of
+    the module-level ``_REGISTRY`` (useful for hermetic tests with stub handlers).
 
     Raises:
         ValueError: for an unknown ``skill_name``.
     """
     if skill_name not in TOOL_CATALOG_BY_SKILL:
         raise ValueError(f"unknown skill: {skill_name}")
+    reg = registry if registry is not None else _REGISTRY
     tools = [
-        make_agent_tool(_REGISTRY[name], context)
+        make_agent_tool(reg[name], context)
         for name in TOOL_CATALOG_BY_SKILL[skill_name]
     ]
     return Agent(
@@ -74,6 +132,11 @@ def build_skill_agent(skill_name: str, model: Model, context: ToolContext) -> Ag
                 tools=tools,
             ),
             tool_execution="sequential",
+            stream_fn=stream_fn,
+            get_api_key=get_api_key,
+            before_tool_call=before_tool_call,
+            after_tool_call=after_tool_call,
+            should_stop_after_turn=should_stop_after_turn,
         )
     )
 

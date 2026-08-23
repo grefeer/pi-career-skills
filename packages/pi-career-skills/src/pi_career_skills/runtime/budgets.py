@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
-from ..errors import CareerToolError
+from ..errors import BUDGET_EXHAUSTED, NO_PROGRESS, CareerToolError
 
 # ---------------------------------------------------------------------------
 # Hard caps (schema ceiling — no run may ever exceed these).
@@ -82,7 +82,7 @@ class BudgetTracker:
     """Track per-run budget consumption and enforce hard ceilings.
 
     Each ``consume_*`` call checks the limit first and raises
-    ``CareerToolError("budget_exhausted", ...)`` when the ceiling is
+    ``CareerToolError(BUDGET_EXHAUSTED, ...)`` when the ceiling is
     reached — the caller does *not* get charged for the refused attempt,
     matching the source kernel's "reserve then finalize" semantics for the
     purpose of the hard ceiling.  Failed-but-executed calls *are* charged
@@ -136,22 +136,22 @@ class BudgetTracker:
 
     def consume_turn(self) -> None:
         if self._consumed.agent_turns >= self._limits.agent_turns:
-            raise CareerToolError("budget_exhausted", "agent_turns budget exhausted")
+            raise CareerToolError(BUDGET_EXHAUSTED, "agent_turns budget exhausted")
         self._consumed.agent_turns += 1
 
     def consume_tool_call(self, artifact_count: int = 0) -> None:
         cap = self.effective_tool_cap(artifact_count)
         if self._consumed.tool_calls >= cap:
-            raise CareerToolError("budget_exhausted", "tool_calls budget exhausted")
+            raise CareerToolError(BUDGET_EXHAUSTED, "tool_calls budget exhausted")
         self._consumed.tool_calls += 1
 
     def consume_model_request(self, tokens: int = 0) -> None:
         if self._consumed.model_requests >= self._limits.model_requests:
-            raise CareerToolError("budget_exhausted", "model_requests budget exhausted")
+            raise CareerToolError(BUDGET_EXHAUSTED, "model_requests budget exhausted")
         if tokens < 0:
             tokens = 0
         if self._consumed.input_tokens + tokens > self._limits.input_tokens:
-            raise CareerToolError("budget_exhausted", "input_tokens budget exhausted")
+            raise CareerToolError(BUDGET_EXHAUSTED, "input_tokens budget exhausted")
         self._consumed.model_requests += 1
         self._consumed.input_tokens += tokens
 
@@ -159,7 +159,7 @@ class BudgetTracker:
         if n < 0:
             n = 0
         if self._consumed.input_tokens + n > self._limits.input_tokens:
-            raise CareerToolError("budget_exhausted", "input_tokens budget exhausted")
+            raise CareerToolError(BUDGET_EXHAUSTED, "input_tokens budget exhausted")
         self._consumed.input_tokens += n
 
     # -- wall clock --------------------------------------------------------
@@ -212,13 +212,30 @@ class BudgetTracker:
     def record_recovery(self) -> None:
         """Increment the auto-recovery counter.
 
-        Raises ``budget_exhausted`` if ``auto_recoveries`` is already at
+        Raises ``BUDGET_EXHAUSTED`` if ``auto_recoveries`` is already at
         the limit; the caller should use ``should_auto_recover`` from the
         recovery module first.
         """
         if self._consumed.auto_recoveries >= self._limits.auto_recoveries:
-            raise CareerToolError("budget_exhausted", "auto_recovery_limit_reached")
+            raise CareerToolError(BUDGET_EXHAUSTED, "auto_recovery_limit_reached")
         self._consumed.auto_recoveries += 1
+
+    def restore_consumed(self, consumed: BudgetConsumed, *, reset_wall_clock: bool = True) -> None:
+        """Seed counters from a prior attempt.
+
+        Wall clock is zeroed (window refresh on recovery per plan §7.3)
+        unless ``reset_wall_clock=False``.  Turn / tool / model / token
+        counters are cumulative and never reset.
+        """
+        self._consumed.agent_turns = consumed.agent_turns
+        self._consumed.tool_calls = consumed.tool_calls
+        self._consumed.model_requests = consumed.model_requests
+        self._consumed.input_tokens = consumed.input_tokens
+        self._consumed.auto_recoveries = consumed.auto_recoveries
+        if reset_wall_clock:
+            self._consumed.wall_clock_seconds = 0.0
+        else:
+            self._consumed.wall_clock_seconds = consumed.wall_clock_seconds
 
 
 class ToolCallGuard:
@@ -234,7 +251,7 @@ class ToolCallGuard:
 
     ``stall_streak`` increments on every call where ``produced_artifact`` is
     False and resets to 0 on progress.  At 6 → soft stop signal; at 9 → hard
-    stop raises ``CareerToolError("no_progress", ...)``.
+    stop raises ``CareerToolError(NO_PROGRESS, ...)``.
     """
 
     def __init__(self) -> None:
@@ -268,6 +285,10 @@ class ToolCallGuard:
         """
         self._stall_streak = 0
 
+    def is_duplicate(self, tool_name: str, params_hash: str) -> bool:
+        """True when this (tool_name, params_hash) already succeeded."""
+        return (tool_name, params_hash) in self._succeeded_keys
+
     def note_call(
         self,
         tool_name: str,
@@ -285,7 +306,7 @@ class ToolCallGuard:
               *does* execute and consume budget.
           ``None`` — proceed normally.
 
-        Raises ``CareerToolError("no_progress", ...)`` when the hard stall
+        Raises ``CareerToolError(NO_PROGRESS, ...)`` when the hard stall
         threshold is reached — the caller must stop the run.
         """
         key = (tool_name, params_hash)
@@ -310,7 +331,7 @@ class ToolCallGuard:
         # Hard stall — raise; soft stall — return signal.
         if self._stall_streak >= HARD_STALL_THRESHOLD:
             raise CareerToolError(
-                "no_progress",
+                NO_PROGRESS,
                 f"hard stall after {self._stall_streak} consecutive no-progress calls",
             )
         if self._stall_streak >= SOFT_STALL_THRESHOLD:

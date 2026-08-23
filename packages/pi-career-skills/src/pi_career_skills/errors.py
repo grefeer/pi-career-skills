@@ -17,11 +17,13 @@ from typing import Final
 
 ANTI_BOT: Final[str] = "anti_bot"
 AUTO_RECOVERY_LIMIT_REACHED: Final[str] = "auto_recovery_limit_reached"
+BUDGET_EXHAUSTED: Final[str] = "budget_exhausted"
 CANDIDATE_URLS_ALREADY_SUPPLIED: Final[str] = "candidate_urls_already_supplied"
 CAPTCHA: Final[str] = "captcha"
 COMPLETION_EVIDENCE_UNAVAILABLE: Final[str] = "completion_evidence_unavailable"
 CONTRACT_OR_POLICY_ERROR: Final[str] = "contract_or_policy_error"
 DELEGATION_SKILL_ALREADY_SUCCEEDED: Final[str] = "delegation_skill_already_succeeded"
+DELEGATION_SKILL_NOT_ALLOWED: Final[str] = "delegation_skill_not_allowed"
 DUPLICATE_TOOL_CALL: Final[str] = "duplicate_tool_call"
 INVALID_MODEL_RESPONSE: Final[str] = "invalid_model_response"
 INVALID_TOOL_INPUT: Final[str] = "invalid_tool_input"
@@ -30,6 +32,7 @@ LOGIN_REQUIRED: Final[str] = "login_required"
 MODEL_API_KEY_MISSING: Final[str] = "model_api_key_missing"
 NEED_USER: Final[str] = "need_user"
 NEEDS_MANUAL_REVIEW: Final[str] = "needs_manual_review"
+NO_PROGRESS: Final[str] = "no_progress"
 NO_PROGRESS_DUPLICATE: Final[str] = "no_progress_duplicate"
 PLAN_OSCILLATION_DETECTED: Final[str] = "plan_oscillation_detected"
 ROUTE_ALREADY_CONSUMED: Final[str] = "route_already_consumed"
@@ -130,11 +133,13 @@ __all__ = [
     # Error codes
     "ANTI_BOT",
     "AUTO_RECOVERY_LIMIT_REACHED",
+    "BUDGET_EXHAUSTED",
     "CANDIDATE_URLS_ALREADY_SUPPLIED",
     "CAPTCHA",
     "COMPLETION_EVIDENCE_UNAVAILABLE",
     "CONTRACT_OR_POLICY_ERROR",
     "DELEGATION_SKILL_ALREADY_SUCCEEDED",
+    "DELEGATION_SKILL_NOT_ALLOWED",
     "DUPLICATE_TOOL_CALL",
     "INVALID_MODEL_RESPONSE",
     "INVALID_TOOL_INPUT",
@@ -143,6 +148,7 @@ __all__ = [
     "MODEL_API_KEY_MISSING",
     "NEED_USER",
     "NEEDS_MANUAL_REVIEW",
+    "NO_PROGRESS",
     "NO_PROGRESS_DUPLICATE",
     "PLAN_OSCILLATION_DETECTED",
     "ROUTE_ALREADY_CONSUMED",

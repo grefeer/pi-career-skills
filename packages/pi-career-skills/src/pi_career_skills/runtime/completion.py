@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from ..errors import CareerToolError
+from ..errors import CONTRACT_OR_POLICY_ERROR, CareerToolError
 
 # ---------------------------------------------------------------------------
 # Constants — VERBATIM from source completion.py.
@@ -292,18 +292,18 @@ class RunCompletionPolicy:
 def terminal_guard(state: Any) -> None:
     """Reject any new call once the run has reached a terminal state.
 
-    Raises ``CareerToolError("contract_or_policy_error", ...)`` when
+    Raises ``CareerToolError(CONTRACT_OR_POLICY_ERROR, ...)`` when
     ``state.terminal`` is True or ``state.status`` is in
     ``TERMINAL_STATUSES``.
     """
     if getattr(state, "terminal", False):
         raise CareerToolError(
-            "contract_or_policy_error",
+            CONTRACT_OR_POLICY_ERROR,
             "run is already terminal — no new calls admitted",
         )
     if getattr(state, "status", None) in TERMINAL_STATUSES:
         raise CareerToolError(
-            "contract_or_policy_error",
+            CONTRACT_OR_POLICY_ERROR,
             f"run status {state.status} is terminal — no new calls admitted",
         )
 
@@ -380,11 +380,16 @@ def matching_fallback(
             )
         raise
 
+    # Promote the observation to evidence (same path as skill-agent tools).
+    promoted: list[Any] = []
+    if getattr(observation, "status", None) == "succeeded":
+        promoted = store.add_observation(observation)
+
     # Update stall guard with the outcome.  A succeeded ``match-observed-jobs``
     # call always persists at least one report artifact (even an empty-match
     # report is persisted), so ``status == "succeeded"`` is the produced signal.
     if tool_guard is not None:
-        produced = getattr(observation, "status", None) == "succeeded"
+        produced = bool(promoted)
         tool_guard.note_call(
             "match-observed-jobs",
             "matching_fallback",

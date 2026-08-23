@@ -61,41 +61,8 @@ class RunEvent(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
-class BudgetLimits(BaseModel):
-    """Hard ceilings for one agent run.
-
-    Mirrors the migration plan §7.1 table exactly: every field is a maximum.
-    Wall-clock is measured in seconds; ``auto_recoveries`` is the number of
-    harness-driven recovery attempts allowed on top of the initial attempt.
-    """
-
-    turns: int = 100
-    tool_calls: int = 200
-    model_requests: int = 500
-    input_tokens: int = 2_000_000
-    wall_clock_seconds: int = 600
-    auto_recoveries: int = 2
-
-
-class BudgetConsumed(BaseModel):
-    """Consumed counters for one agent run.
-
-    Zero-valued defaults mean "not yet started"; counters are monotonic
-    across resume/recover calls.
-    """
-
-    turns: int = 0
-    tool_calls: int = 0
-    model_requests: int = 0
-    input_tokens: int = 0
-    wall_clock_seconds: int = 0
-    auto_recoveries: int = 0
-
-
 __all__ = [
     "ToolObservation",
     "Artifact",
     "RunEvent",
-    "BudgetLimits",
-    "BudgetConsumed",
 ]

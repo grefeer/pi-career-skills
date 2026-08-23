@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from ..errors import CareerToolError
+from ..errors import CONTRACT_OR_POLICY_ERROR, CareerToolError
 
 
 class RunStatus(StrEnum):
@@ -74,12 +74,12 @@ def transition(
     """Transition ``state`` to ``new_status`` with optional bookkeeping.
 
     Raises:
-        CareerToolError: with code ``contract_or_policy_error`` if the run is
+        CareerToolError: with code ``CONTRACT_OR_POLICY_ERROR`` if the run is
             already terminal or if the transition is otherwise invalid.
     """
     if state.terminal:
         raise CareerToolError(
-            "contract_or_policy_error",
+            CONTRACT_OR_POLICY_ERROR,
             f"run {state.run_id} is terminal; refusing transition to {new_status.value}",
         )
     state.status = new_status

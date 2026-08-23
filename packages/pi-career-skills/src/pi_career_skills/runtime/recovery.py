@@ -139,7 +139,7 @@ def recovery_plan(attempt_index: int) -> RecoveryPlan:
 
 
 def assert_recovery_allowed(error_code: str, attempt_index: int, max_recoveries: int = 2) -> None:
-    """Raise ``CareerToolError("contract_or_policy_error", ...)`` when a
+    """Raise ``CareerToolError(CONTRACT_OR_POLICY_ERROR, ...)`` when a
     recovery is attempted outside policy.
 
     The controller should call ``should_auto_recover`` first; this is a
@@ -147,12 +147,12 @@ def assert_recovery_allowed(error_code: str, attempt_index: int, max_recoveries:
     """
     if error_code in NEVER_AUTO_RECOVER_REASONS:
         raise CareerToolError(
-            "contract_or_policy_error",
+            CONTRACT_OR_POLICY_ERROR,
             f"blocked reason {error_code} must not auto-recover",
         )
     if not should_auto_recover(error_code, attempt_index, max_recoveries):
         raise CareerToolError(
-            "contract_or_policy_error",
+            CONTRACT_OR_POLICY_ERROR,
             f"recovery not allowed: {error_code} at attempt {attempt_index}",
         )
 
