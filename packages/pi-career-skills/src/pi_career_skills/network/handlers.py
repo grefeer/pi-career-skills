@@ -1,61 +1,33 @@
-"""Network tool handlers — **Phase 6 replaces this file** with the real
-implementations ported from ``skill/job_discovery/runtime/*``
-(playwright_worker / classify_url / wechat / career_sheets) plus the
-public-URL guard.
+"""Network tool handlers — real Phase 6 implementations.
 
-Until then every handler is a deterministic stub that fails closed: raising
-``tool_execution_failed`` so a model can never believe a page was fetched,
-searched, or classified.  Signatures follow the shared handler contract
-``(context, input) -> output_model`` so the registry wiring does not change
-when the real implementations land.
+Phase 6 replaces the fail-closed stubs with implementations ported verbatim
+from ``skill/job_discovery/runtime/*``:
+
+- ``fetch_public_job_pages``  -> :mod:`.batch_fetch` (list expansion + official
+  campus / iguopin / tencent detail discovery);
+- ``fetch_public_job_page``   -> :mod:`.page_fetch` (SSRF-guarded requests path
+  + Playwright render fallback + WeChat OCR route);
+- ``search_public_job_pages`` -> :mod:`.public_search` (Bing -> 360 -> Sogou
+  fallback chain + Juejin official recent search);
+- ``query_career_sheet_records`` -> :mod:`.career_sheets` (mcporter bridge with
+  stable ``SheetQueryError`` codes);
+- ``fetch_wechat_article``    -> :mod:`.wechat` (OCR pipeline, gated off by
+  default);
+- ``classify_job_url``        -> :mod:`.classify_url` (4KB probe site
+  classification).
+
+Signatures follow the shared handler contract ``(context, input) -> output``,
+so the registry wiring is unchanged from the fail-closed stubs.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
-from ..context import ToolContext
-from ..errors import TOOL_EXECUTION_FAILED, CareerToolError
-
-#: Raised by every stub until Phase 6 lands the real implementations.
-_PHASE6_MESSAGE = "network handler ported in phase 6"
-
-
-def _not_ported(context: ToolContext, payload: Any) -> Any:
-    """Shared stub body — fail closed, never pretend success."""
-    del context, payload
-    raise CareerToolError(TOOL_EXECUTION_FAILED, _PHASE6_MESSAGE)
-
-
-def fetch_public_job_pages(context: ToolContext, payload: Any) -> Any:
-    """Stub — batch fetch of public job pages (Phase 6)."""
-    return _not_ported(context, payload)
-
-
-def fetch_public_job_page(context: ToolContext, payload: Any) -> Any:
-    """Stub — single public job page fetch (Phase 6)."""
-    return _not_ported(context, payload)
-
-
-def search_public_job_pages(context: ToolContext, payload: Any) -> Any:
-    """Stub — public job-page search (Phase 6)."""
-    return _not_ported(context, payload)
-
-
-def query_career_sheet_records(context: ToolContext, payload: Any) -> Any:
-    """Stub — career smartsheet record query (Phase 6)."""
-    return _not_ported(context, payload)
-
-
-def fetch_wechat_article(context: ToolContext, payload: Any) -> Any:
-    """Stub — WeChat article OCR fetch (Phase 6)."""
-    return _not_ported(context, payload)
-
-
-def classify_job_url(context: ToolContext, payload: Any) -> Any:
-    """Stub — low-budget URL classification (Phase 6)."""
-    return _not_ported(context, payload)
-
+from .batch_fetch import fetch_public_job_pages
+from .career_sheets import query_career_sheet_records
+from .classify_url import classify_job_url
+from .page_fetch import fetch_public_job_page
+from .public_search import search_public_job_pages
+from .wechat import fetch_wechat_article
 
 __all__ = [
     "fetch_public_job_pages",

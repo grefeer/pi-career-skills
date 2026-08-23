@@ -1,8 +1,13 @@
 """Pure (no network, no DB) job-discovery tool handlers.
 
 These handlers implement the deterministic, evidence-bound logic for the
-job-discovery skill tools. Network tools live in :mod:`pi_career_skills.network`
-and are replaced in Phase 6.
+job-discovery skill tools. Network tools live in :mod:`pi_career_skills.network`.
+
+``validate_observed_candidates`` and ``deduplicate_observed_jobs`` were moved
+to :mod:`pi_career_skills.business.job_discovery.validate_candidates` and
+:mod:`pi_career_skills.business.job_discovery.deduplicate_observed` in Phase 6
+(§5 parity fix, breaking the network-handler import cycle); they are
+re-exported below so ``registry.py`` wiring is untouched.
 
 All handlers are synchronous ``(ToolContext, InputModel) -> OutputModel``
 functions. The adapter wraps them with ``asyncio.to_thread`` for the
@@ -13,7 +18,6 @@ from __future__ import annotations
 
 import json
 import re
-import unicodedata
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -21,59 +25,17 @@ from ...context import ToolContext
 from ...errors import TARGET_EVIDENCE_NOT_FOUND, CareerToolError
 from . import jd_extraction
 from .models import (
-    CandidateIssue,
-    DeduplicatedRemoval,
-    DeduplicateObservedJobsInput,
-    DeduplicateObservedJobsOutput,
     ExtractedJobDetails,
     ExtractObservedJobDetailsBatchInput,
     ExtractObservedJobDetailsBatchOutput,
     ExtractObservedJobDetailsInput,
     ExtractObservedJobDetailsOutput,
-    ValidateObservedCandidatesInput,
-    ValidateObservedCandidatesOutput,
 )
 from .target_evidence import resolve_target_evidence
 from .title_validation import (
     _extract_portal_role_text,
     _infer_official_page_title,
     _is_plausible_job_title,
-)
-
-# ---------------------------------------------------------------------------
-# validate-observed-candidates  constants
-# ---------------------------------------------------------------------------
-
-_MIN_DESCRIPTION_LENGTH = 50
-_STALE_YEAR_THRESHOLD = 2024
-_JD_KEYWORDS = (
-    "岗位",
-    "职位",
-    "招聘",
-    "要求",
-    "职责",
-    "job",
-    "position",
-    "requirement",
-    "responsibility",
-    "qualification",
-)
-_YEAR_RE = re.compile(r"\b(20[0-9]{2})\b")
-
-# ---------------------------------------------------------------------------
-# deduplicate-observed-jobs  constants
-# ---------------------------------------------------------------------------
-
-_INVISIBLE_CHARS = "​‌‍‎‏﻿　\t"
-_ASCII_PUNCT = ",.:;!?()[]\"'<>/\\-~"
-_CJK_PUNCT = (
-    "【】「」『』《》〈〉"
-    "〔〕，。、；：！？（）"
-)
-_DELETE_TABLE = str.maketrans("", "", _ASCII_PUNCT + _CJK_PUNCT)
-_WHITESPACE_RE = re.compile(r"\s+")
-_TRAILING_QUALIFIER_RE = re.compile(
-    r"(?:（[^（）]*）|\([^()]*\)|【[^【】]*】)\s*$"
 )
 
 _ADAPTER_RECORD_KEYS = frozenset({"title", "description", "apply_url"})
@@ -572,248 +534,14 @@ def extract_observed_job_details_batch(
 
 
 # ---------------------------------------------------------------------------
-# validate-observed-candidates
+# validate-observed-candidates / deduplicate-observed-jobs  (Phase 6 §5 move)
 # ---------------------------------------------------------------------------
-
-
-def validate_observed_candidates(
-    context: ToolContext, payload: ValidateObservedCandidatesInput
-) -> ValidateObservedCandidatesOutput:
-    """Run the staleness / vagueness / non-JD gates over observed evidence."""
-    issues: list[CandidateIssue] = []
-    for artifact_id in payload.artifact_ids:
-        evidence = _find_observed_evidence(context, artifact_id)
-        if evidence is None:
-            issues.append(
-                CandidateIssue(
-                    artifact_id=artifact_id,
-                    code="evidence_not_found",
-                    detail="no observed evidence with this artifact_id",
-                )
-            )
-            continue
-        visible_text = evidence.get("visible_text")
-        if not isinstance(visible_text, str) or not visible_text:
-            issues.append(
-                CandidateIssue(
-                    artifact_id=artifact_id,
-                    code="evidence_incomplete",
-                    detail="evidence has no visible_text",
-                )
-            )
-            continue
-        issues.extend(_quality_issues(artifact_id, visible_text))
-    return ValidateObservedCandidatesOutput(valid=not issues, issues=issues)
-
-
-def _quality_issues(artifact_id: str, text: str) -> list[CandidateIssue]:
-    """The three evidence-quality gates (validate.py --verify semantics)."""
-    issues: list[CandidateIssue] = []
-    for year in _YEAR_RE.findall(text):
-        if 2000 < int(year) < _STALE_YEAR_THRESHOLD:
-            issues.append(
-                CandidateIssue(
-                    artifact_id=artifact_id,
-                    code="stale_year",
-                    detail=f"references year {year} (threshold: {_STALE_YEAR_THRESHOLD})",
-                )
-            )
-            break
-    stripped = text.strip()
-    if len(stripped) < _MIN_DESCRIPTION_LENGTH:
-        issues.append(
-            CandidateIssue(
-                artifact_id=artifact_id,
-                code="vague_description",
-                detail=f"{len(stripped)} chars (min: {_MIN_DESCRIPTION_LENGTH})",
-            )
-        )
-    lowered = text.lower()
-    if len(text) > 100:
-        keyword_hits = sum(1 for keyword in _JD_KEYWORDS if keyword in lowered)
-        if keyword_hits < 2:
-            issues.append(
-                CandidateIssue(
-                    artifact_id=artifact_id,
-                    code="non_jd_text",
-                    detail=f"only {keyword_hits} JD keywords found",
-                )
-            )
-    return issues
-
-
-# ---------------------------------------------------------------------------
-# deduplicate-observed-jobs
-# ---------------------------------------------------------------------------
-
-
-def deduplicate_observed_jobs(
-    context: ToolContext, payload: DeduplicateObservedJobsInput
-) -> DeduplicateObservedJobsOutput:
-    """Dedupe observed artifacts by canonical identity, preserving run order."""
-    kept: list[str] = []
-    removed: list[DeduplicatedRemoval] = []
-    seen: dict[str, str] = {}
-    for artifact_id in payload.artifact_ids:
-        evidence = _find_observed_evidence(context, artifact_id)
-        if evidence is None:
-            removed.append(
-                DeduplicatedRemoval(
-                    artifact_id=artifact_id,
-                    reason="evidence_not_found",
-                    detail="no observed evidence with this artifact_id",
-                )
-            )
-            continue
-        visible_text = evidence.get("visible_text")
-        if not isinstance(visible_text, str) or not visible_text:
-            removed.append(
-                DeduplicatedRemoval(
-                    artifact_id=artifact_id,
-                    reason="evidence_incomplete",
-                    detail="evidence has no visible_text",
-                )
-            )
-            continue
-        keys = _evidence_identity_keys(context, artifact_id, evidence)
-        if not keys:
-            kept.append(artifact_id)
-            continue
-        collision = next((seen[key] for key in keys if key in seen), None)
-        if collision is not None:
-            removed.append(
-                DeduplicatedRemoval(
-                    artifact_id=artifact_id,
-                    reason="duplicate_identity",
-                    detail=f"shares identity with kept artifact {collision}",
-                )
-            )
-            continue
-        kept.append(artifact_id)
-        for key in keys:
-            seen.setdefault(key, artifact_id)
-    return DeduplicateObservedJobsOutput(kept=kept, removed=removed)
-
-
-def _evidence_identity_keys(
-    context: ToolContext, artifact_id: str, evidence: dict[str, object]
-) -> tuple[str, ...]:
-    """All canonical identity keys one artifact claims, in priority order."""
-    records = _parse_adapter_evidence(str(evidence["visible_text"]))
-    if records is not None:
-        keys = [key for record in records for key in _record_identity_keys(record)]
-        return tuple(dict.fromkeys(keys))
-    try:
-        output = extract_observed_job_details(
-            context, ExtractObservedJobDetailsInput(artifact_id=artifact_id)
-        )
-    except CareerToolError:
-        return ()
-    keys = [key for candidate in output.candidates for key in _detail_identity_keys(candidate)]
-    return tuple(dict.fromkeys(keys))
-
-
-def _record_identity_keys(record: dict[str, object]) -> tuple[str, ...]:
-    """Identity keys for one normalized adapter record."""
-    job_id = record.get("job_id")
-    if isinstance(job_id, str) and job_id:
-        return (f"job_id:{job_id}",)
-    apply_url = record.get("apply_url")
-    url_key = _url_identity(apply_url if isinstance(apply_url, str) else None)
-    location = record.get("location")
-    locations = [location] if isinstance(location, str) and location else []
-    title = record.get("title")
-    title_key = _title_identity(
-        title if isinstance(title, str) else None, locations, []
-    )
-    return tuple(key for key in (url_key, title_key) if key)
-
-
-def _detail_identity_keys(detail: ExtractedJobDetails) -> tuple[str, ...]:
-    """Identity keys for one extracted JD candidate (page-text path)."""
-    url_key = _url_identity(detail.apply_url)
-    if url_key:
-        return (url_key,)
-    title_key = _title_identity(
-        detail.title, detail.locations, detail.recruitment_types
-    )
-    return (title_key,) if title_key else ()
-
-
-def _url_identity(apply_url: str | None) -> str:
-    normalized = _normalize_apply_url(apply_url)
-    return f"url:{normalized}" if normalized else ""
-
-
-def _normalize_apply_url(url: str | None) -> str:
-    """Normalize an apply URL for identity comparison."""
-    if not url:
-        return ""
-    try:
-        parsed = urlsplit(url.strip())
-    except ValueError:
-        return url.strip().lower()
-    if parsed.scheme not in {"http", "https"}:
-        return url.strip().lower()
-    host = (parsed.hostname or "").lower().rstrip(".")
-    path = parsed.path.rstrip("/") or "/"
-    # Drop common tracking params.
-    query_parts = [
-        f"{k}={v}"
-        for k, vs in parse_query_safe(parsed.query).items()
-        for v in vs
-        if k.lower() not in {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "ref", "source"}
-    ]
-    query = "&".join(sorted(query_parts))
-    normalized = f"{parsed.scheme.lower()}://{host}{path}"
-    if query:
-        normalized += f"?{query}"
-    return normalized
-
-
-def parse_query_safe(query: str) -> dict[str, list[str]]:
-    """Safely parse a query string; returns {} on error."""
-    if not query:
-        return {}
-    try:
-        from urllib.parse import parse_qs
-        return parse_qs(query)
-    except ValueError:
-        return {}
-
-
-def _title_identity(
-    title: str | None,
-    locations: list[str],
-    recruitment_types: list[str],
-) -> str:
-    """Normalized-title identity, scoped by location/recruitment type."""
-    if not title or not title.strip():
-        return ""
-    normalized = _normalize_title(title)
-    if not normalized:
-        return ""
-    loc_key = "+".join(sorted(locations)) if locations else ""
-    rt_key = "+".join(sorted(recruitment_types)) if recruitment_types else ""
-    return f"title:{normalized}|loc:{loc_key}|rt:{rt_key}"
-
-
-def _normalize_title(title: str) -> str:
-    """Aggressively normalize a title for identity comparison."""
-    text = title
-    # Strip invisible characters.
-    for ch in _INVISIBLE_CHARS:
-        text = text.replace(ch, "")
-    # Strip trailing qualifiers like (校招) / （北京）.
-    text = _TRAILING_QUALIFIER_RE.sub("", text)
-    # Normalize unicode.
-    text = unicodedata.normalize("NFKC", text)
-    # Remove punctuation.
-    text = text.translate(_DELETE_TABLE)
-    # Collapse whitespace.
-    text = _WHITESPACE_RE.sub("", text)
-    return text.lower()
-
+# Moved verbatim to ``validate_candidates.py`` / ``deduplicate_observed.py``
+# (they import ``_find_observed_evidence`` / ``_parse_adapter_evidence`` /
+# ``extract_observed_job_details`` from this module, so the re-exports below
+# must stay at the bottom of the module to avoid a circular import).
+from .deduplicate_observed import deduplicate_observed_jobs  # noqa: E402
+from .validate_candidates import validate_observed_candidates  # noqa: E402
 
 __all__ = [
     "extract_observed_job_details",
