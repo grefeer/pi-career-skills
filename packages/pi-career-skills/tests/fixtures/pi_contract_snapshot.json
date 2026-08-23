@@ -1,0 +1,2243 @@
+{
+  "schema_version": "pi_contract_v1",
+  "tool_count": 12,
+  "tools": [
+    {
+      "name": "extract-observed-job-details-batch",
+      "skill_name": "job-discovery",
+      "is_deliverable": true,
+      "artifact_type": "structured_job_details",
+      "description": "批量把已观察页面证据规范化为详细 JD；不接受模型生成的正文。",
+      "input_model": {
+        "description": "A finite set of previously observed evidence artifacts to normalize.",
+        "properties": {
+          "artifact_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Artifact Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "artifact_ids"
+        ],
+        "title": "ExtractObservedJobDetailsBatchInput",
+        "type": "object"
+      },
+      "output_model": {
+        "$defs": {
+          "ExtractObservedJobDetailsOutput": {
+            "description": "Structured JD candidates derived only from a selected captured page.",
+            "properties": {
+              "source_artifact_id": {
+                "title": "Source Artifact Id",
+                "type": "string"
+              },
+              "source_url": {
+                "title": "Source Url",
+                "type": "string"
+              },
+              "content_hash": {
+                "title": "Content Hash",
+                "type": "string"
+              },
+              "source_quality": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "jd_complete",
+                      "list_only",
+                      "js_shell",
+                      "empty"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Source Quality"
+              },
+              "candidates": {
+                "items": {
+                  "$ref": "#/$defs/ExtractedJobDetails"
+                },
+                "title": "Candidates",
+                "type": "array"
+              }
+            },
+            "required": [
+              "source_artifact_id",
+              "source_url",
+              "content_hash",
+              "candidates"
+            ],
+            "title": "ExtractObservedJobDetailsOutput",
+            "type": "object"
+          },
+          "ExtractedJobDetails": {
+            "description": "A normalized job DTO whose values remain traceable to one page artifact.",
+            "properties": {
+              "title": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Title"
+              },
+              "company_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Company Name"
+              },
+              "locations": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Locations",
+                "type": "array"
+              },
+              "responsibilities": {
+                "title": "Responsibilities",
+                "type": "string"
+              },
+              "requirements": {
+                "title": "Requirements",
+                "type": "string"
+              },
+              "recruitment_types": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Recruitment Types",
+                "type": "array"
+              },
+              "apply_url": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Apply Url"
+              },
+              "deadline_text": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Deadline Text"
+              },
+              "published_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Published At"
+              },
+              "confidence": {
+                "title": "Confidence",
+                "type": "number"
+              },
+              "evidence_refs": {
+                "items": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "title": "Evidence Refs",
+                "type": "array"
+              },
+              "normalization_warnings": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Normalization Warnings",
+                "type": "array"
+              },
+              "skills": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Skills",
+                "type": "array"
+              },
+              "min_degree": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Min Degree"
+              },
+              "priority": {
+                "default": "unknown",
+                "title": "Priority",
+                "type": "string"
+              },
+              "strength": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Strength"
+              },
+              "taxonomy": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Taxonomy",
+                "type": "array"
+              }
+            },
+            "required": [
+              "title",
+              "company_name",
+              "locations",
+              "responsibilities",
+              "requirements",
+              "recruitment_types",
+              "apply_url",
+              "deadline_text",
+              "confidence",
+              "evidence_refs",
+              "normalization_warnings"
+            ],
+            "title": "ExtractedJobDetails",
+            "type": "object"
+          }
+        },
+        "description": "One structured result per requested immutable public-page artifact.",
+        "properties": {
+          "details": {
+            "items": {
+              "$ref": "#/$defs/ExtractObservedJobDetailsOutput"
+            },
+            "title": "Details",
+            "type": "array"
+          }
+        },
+        "required": [
+          "details"
+        ],
+        "title": "ExtractObservedJobDetailsBatchOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fetch-public-job-pages",
+      "skill_name": "job-discovery",
+      "is_deliverable": true,
+      "artifact_type": "public_job_page",
+      "description": "批量抓取用户给出的有限官方 URL，返回每页可追溯正文或明确失败原因。每个成功页面带 quality=jd_complete/list_only/js_shell/empty；只有 jd_complete 才可直接进入 JD 提取与匹配，list_only 会优先展开详情页，js_shell/empty 不得冒充 JD 成功。JS 卡片列表页会自动展开：列表页本身 + 前 5 个详情页正文一并返回。failures 列表中的失败仅针对列出的 URL 本身；同批其余 URL 仍应继续逐一尝试。",
+      "input_model": {
+        "description": "A finite Agent-selected set of official public pages to capture at once.",
+        "properties": {
+          "urls": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Urls",
+            "type": "array"
+          }
+        },
+        "required": [
+          "urls"
+        ],
+        "title": "FetchPublicJobPagesInput",
+        "type": "object"
+      },
+      "output_model": {
+        "$defs": {
+          "FetchPublicJobPageOutput": {
+            "properties": {
+              "artifact_id": {
+                "title": "Artifact Id",
+                "type": "string"
+              },
+              "source_url": {
+                "title": "Source Url",
+                "type": "string"
+              },
+              "title": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Title"
+              },
+              "visible_text": {
+                "title": "Visible Text",
+                "type": "string"
+              },
+              "content_hash": {
+                "title": "Content Hash",
+                "type": "string"
+              },
+              "effective_url": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Effective Url"
+              },
+              "redirect_chain": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Redirect Chain",
+                "type": "array"
+              },
+              "http_status": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Http Status"
+              },
+              "quality": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "jd_complete",
+                      "list_only",
+                      "js_shell",
+                      "empty"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quality"
+              },
+              "quality_signal": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quality Signal"
+              },
+              "detail_links": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Detail Links",
+                "type": "array"
+              }
+            },
+            "required": [
+              "artifact_id",
+              "source_url",
+              "title",
+              "visible_text",
+              "content_hash"
+            ],
+            "title": "FetchPublicJobPageOutput",
+            "type": "object"
+          },
+          "PublicJobPageFetchFailure": {
+            "description": "One transparent per-page failure; successful evidence remains usable.",
+            "properties": {
+              "source_url": {
+                "title": "Source Url",
+                "type": "string"
+              },
+              "error_code": {
+                "title": "Error Code",
+                "type": "string"
+              },
+              "effective_url": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Effective Url"
+              },
+              "redirect_chain": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Redirect Chain",
+                "type": "array"
+              },
+              "http_status": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Http Status"
+              },
+              "message": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Message"
+              }
+            },
+            "required": [
+              "source_url",
+              "error_code"
+            ],
+            "title": "PublicJobPageFetchFailure",
+            "type": "object"
+          }
+        },
+        "description": "All successfully captured pages plus explicit failures from one bounded batch.",
+        "properties": {
+          "pages": {
+            "items": {
+              "$ref": "#/$defs/FetchPublicJobPageOutput"
+            },
+            "title": "Pages",
+            "type": "array"
+          },
+          "failures": {
+            "items": {
+              "$ref": "#/$defs/PublicJobPageFetchFailure"
+            },
+            "title": "Failures",
+            "type": "array"
+          }
+        },
+        "required": [
+          "pages"
+        ],
+        "title": "FetchPublicJobPagesOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "search-public-job-pages",
+      "skill_name": "job-discovery",
+      "is_deliverable": true,
+      "artifact_type": "job_search_results",
+      "description": "搜索公开招聘页；仅在用户没有提供候选 URL（或全部候选 URL 均已抓取失败：fetch 错误或 dead_link 死链）、且 smartsheet 无匹配记录时用于发现直接招聘链接；部分候选失败绝不授权搜索。",
+      "input_model": {
+        "description": "A bounded public-web query selected by the Executor from the user's goal.",
+        "properties": {
+          "query": {
+            "maxLength": 400,
+            "minLength": 2,
+            "title": "Query",
+            "type": "string"
+          },
+          "max_results": {
+            "default": 5,
+            "maximum": 10,
+            "minimum": 1,
+            "title": "Max Results",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "SearchPublicJobPagesInput",
+        "type": "object"
+      },
+      "output_model": {
+        "$defs": {
+          "PublicCommunityScanRecord": {
+            "description": "One timestamped record inspected during an official community scan.",
+            "properties": {
+              "title": {
+                "title": "Title",
+                "type": "string"
+              },
+              "url": {
+                "title": "Url",
+                "type": "string"
+              },
+              "snippet": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Snippet"
+              },
+              "published_at": {
+                "title": "Published At",
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "url",
+              "published_at"
+            ],
+            "title": "PublicCommunityScanRecord",
+            "type": "object"
+          },
+          "PublicJobSearchResult": {
+            "description": "One direct public career link observed in a fixed search-provider response.",
+            "properties": {
+              "title": {
+                "title": "Title",
+                "type": "string"
+              },
+              "url": {
+                "title": "Url",
+                "type": "string"
+              },
+              "snippet": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Snippet"
+              }
+            },
+            "required": [
+              "title",
+              "url"
+            ],
+            "title": "PublicJobSearchResult",
+            "type": "object"
+          }
+        },
+        "description": "Search evidence that lets the Executor choose a public page to inspect next.",
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/$defs/PublicJobSearchResult"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "terminal_reason": {
+            "default": "candidates_found",
+            "enum": [
+              "candidates_found",
+              "search_empty"
+            ],
+            "title": "Terminal Reason",
+            "type": "string"
+          },
+          "provider": {
+            "default": "public_web_search",
+            "enum": [
+              "public_web_search",
+              "juejin_official_search"
+            ],
+            "title": "Provider",
+            "type": "string"
+          },
+          "source_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Scope"
+          },
+          "time_window_days": {
+            "anyOf": [
+              {
+                "maximum": 365,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Time Window Days"
+          },
+          "coverage_complete": {
+            "default": false,
+            "title": "Coverage Complete",
+            "type": "boolean"
+          },
+          "scanned_result_count": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Scanned Result Count",
+            "type": "integer"
+          },
+          "matched_result_count": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Matched Result Count",
+            "type": "integer"
+          },
+          "scan_queries": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scan Queries",
+            "type": "array"
+          },
+          "scan_evidence": {
+            "items": {
+              "$ref": "#/$defs/PublicCommunityScanRecord"
+            },
+            "title": "Scan Evidence",
+            "type": "array"
+          }
+        },
+        "required": [
+          "query",
+          "source_url",
+          "content_hash",
+          "results"
+        ],
+        "title": "SearchPublicJobPagesOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "query-career-sheet-records",
+      "skill_name": "job-discovery",
+      "is_deliverable": true,
+      "artifact_type": "job_search_results",
+      "description": "查询招聘 smartsheet（内推/招聘链接台账）按企业/岗位/地点关键词与近 N 天过滤，返回候选招聘 URL；每条记录带 prior_metadata（公司/投递链接/内推码/更新时间）补足页面缺失字段；主证据源，无匹配记录时才用网络搜索；当 smartsheet 接口不可用或受限（error sheet_rate_limited / sheet_call_failed，如每日访问配额 400007 用尽）时，search-public-job-pages 是授权的备用数据源，应切换到公开搜索。",
+      "input_model": {
+        "additionalProperties": false,
+        "description": "Keywords are substring-matched against company/industry/location/summary.",
+        "properties": {
+          "company_keywords": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "title": "Company Keywords",
+            "type": "array"
+          },
+          "role_keywords": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "title": "Role Keywords",
+            "type": "array"
+          },
+          "location_keywords": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "title": "Location Keywords",
+            "type": "array"
+          },
+          "recent_days": {
+            "anyOf": [
+              {
+                "maximum": 365,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Recent Days"
+          }
+        },
+        "title": "QueryCareerSheetRecordsInput",
+        "type": "object"
+      },
+      "output_model": {
+        "$defs": {
+          "CareerSheetPriorMetadata": {
+            "description": "Smartsheet-carried facts that can fill fields a page lacks.\n\nField mapping mirrors smartsheet-sources.md: 企业名称 -> company_name,\n内推/招聘/投递链接 -> apply_url, 内推码(区分大小写) -> referral_code,\n更新时间/更新日期 -> update_time.",
+            "properties": {
+              "company_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Company Name"
+              },
+              "apply_url": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Apply Url"
+              },
+              "referral_code": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Referral Code"
+              },
+              "update_time": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Update Time"
+              }
+            },
+            "title": "CareerSheetPriorMetadata",
+            "type": "object"
+          },
+          "CareerSheetRecord": {
+            "properties": {
+              "company_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Company Name"
+              },
+              "apply_url": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Apply Url"
+              },
+              "sheet_name": {
+                "title": "Sheet Name",
+                "type": "string"
+              },
+              "industry": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Industry"
+              },
+              "location": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Location"
+              },
+              "recruitment_type": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Recruitment Type"
+              },
+              "updated_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Updated At"
+              },
+              "raw_summary": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Raw Summary"
+              },
+              "prior_metadata": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/CareerSheetPriorMetadata"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "source_url": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Source Url"
+              },
+              "content_hash": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Content Hash"
+              }
+            },
+            "required": [
+              "sheet_name"
+            ],
+            "title": "CareerSheetRecord",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "records": {
+            "items": {
+              "$ref": "#/$defs/CareerSheetRecord"
+            },
+            "title": "Records",
+            "type": "array"
+          },
+          "matched_count": {
+            "title": "Matched Count",
+            "type": "integer"
+          },
+          "scanned_count": {
+            "title": "Scanned Count",
+            "type": "integer"
+          },
+          "sheets_queried": {
+            "title": "Sheets Queried",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "query": {
+            "additionalProperties": true,
+            "title": "Query",
+            "type": "object"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "records",
+          "matched_count",
+          "scanned_count",
+          "sheets_queried",
+          "truncated",
+          "query",
+          "source_url",
+          "content_hash"
+        ],
+        "title": "QueryCareerSheetRecordsOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fetch-public-job-page",
+      "skill_name": "job-discovery",
+      "is_deliverable": true,
+      "artifact_type": "public_job_page",
+      "description": "抓取一页公开招聘页面并生成带来源、内容哈希和质量分级的证据；quality=js_shell/empty 时不得作为完整 JD 交付。",
+      "input_model": {
+        "description": "One public HTTP(S) URL selected autonomously by Executor.",
+        "properties": {
+          "url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "FetchPublicJobPageInput",
+        "type": "object"
+      },
+      "output_model": {
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "visible_text": {
+            "title": "Visible Text",
+            "type": "string"
+          },
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "effective_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Effective Url"
+          },
+          "redirect_chain": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Redirect Chain",
+            "type": "array"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Http Status"
+          },
+          "quality": {
+            "anyOf": [
+              {
+                "enum": [
+                  "jd_complete",
+                  "list_only",
+                  "js_shell",
+                  "empty"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Quality"
+          },
+          "quality_signal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Quality Signal"
+          },
+          "detail_links": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Detail Links",
+            "type": "array"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "source_url",
+          "title",
+          "visible_text",
+          "content_hash"
+        ],
+        "title": "FetchPublicJobPageOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "extract-observed-job-details",
+      "skill_name": "job-discovery",
+      "is_deliverable": true,
+      "artifact_type": "structured_job_details",
+      "description": "把一份已观察页面证据规范化为详细 JD。",
+      "input_model": {
+        "description": "The immutable evidence artifact selected by an autonomous Agent.",
+        "properties": {
+          "artifact_id": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Artifact Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_id"
+        ],
+        "title": "ExtractObservedJobDetailsInput",
+        "type": "object"
+      },
+      "output_model": {
+        "$defs": {
+          "ExtractedJobDetails": {
+            "description": "A normalized job DTO whose values remain traceable to one page artifact.",
+            "properties": {
+              "title": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Title"
+              },
+              "company_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Company Name"
+              },
+              "locations": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Locations",
+                "type": "array"
+              },
+              "responsibilities": {
+                "title": "Responsibilities",
+                "type": "string"
+              },
+              "requirements": {
+                "title": "Requirements",
+                "type": "string"
+              },
+              "recruitment_types": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Recruitment Types",
+                "type": "array"
+              },
+              "apply_url": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Apply Url"
+              },
+              "deadline_text": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Deadline Text"
+              },
+              "published_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Published At"
+              },
+              "confidence": {
+                "title": "Confidence",
+                "type": "number"
+              },
+              "evidence_refs": {
+                "items": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "title": "Evidence Refs",
+                "type": "array"
+              },
+              "normalization_warnings": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Normalization Warnings",
+                "type": "array"
+              },
+              "skills": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Skills",
+                "type": "array"
+              },
+              "min_degree": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Min Degree"
+              },
+              "priority": {
+                "default": "unknown",
+                "title": "Priority",
+                "type": "string"
+              },
+              "strength": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Strength"
+              },
+              "taxonomy": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Taxonomy",
+                "type": "array"
+              }
+            },
+            "required": [
+              "title",
+              "company_name",
+              "locations",
+              "responsibilities",
+              "requirements",
+              "recruitment_types",
+              "apply_url",
+              "deadline_text",
+              "confidence",
+              "evidence_refs",
+              "normalization_warnings"
+            ],
+            "title": "ExtractedJobDetails",
+            "type": "object"
+          }
+        },
+        "description": "Structured JD candidates derived only from a selected captured page.",
+        "properties": {
+          "source_artifact_id": {
+            "title": "Source Artifact Id",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "source_quality": {
+            "anyOf": [
+              {
+                "enum": [
+                  "jd_complete",
+                  "list_only",
+                  "js_shell",
+                  "empty"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Quality"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/$defs/ExtractedJobDetails"
+            },
+            "title": "Candidates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source_artifact_id",
+          "source_url",
+          "content_hash",
+          "candidates"
+        ],
+        "title": "ExtractObservedJobDetailsOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "validate-observed-candidates",
+      "skill_name": "job-discovery",
+      "is_deliverable": null,
+      "artifact_type": null,
+      "description": "对已观察页面证据做确定性质量校验（陈旧年份/正文过短/非 JD 文本），供 Verifier 判 PASS/REPLAN。",
+      "input_model": {
+        "description": "A bounded set of previously observed evidence artifacts to check.",
+        "properties": {
+          "artifact_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Artifact Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "artifact_ids"
+        ],
+        "title": "ValidateObservedCandidatesInput",
+        "type": "object"
+      },
+      "output_model": {
+        "$defs": {
+          "CandidateIssue": {
+            "description": "One evidence-quality finding for one artifact.",
+            "properties": {
+              "artifact_id": {
+                "title": "Artifact Id",
+                "type": "string"
+              },
+              "code": {
+                "title": "Code",
+                "type": "string"
+              },
+              "detail": {
+                "title": "Detail",
+                "type": "string"
+              }
+            },
+            "required": [
+              "artifact_id",
+              "code",
+              "detail"
+            ],
+            "title": "CandidateIssue",
+            "type": "object"
+          }
+        },
+        "description": "Aggregate quality verdict; valid is False when any issue exists.",
+        "properties": {
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/$defs/CandidateIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          }
+        },
+        "required": [
+          "valid",
+          "issues"
+        ],
+        "title": "ValidateObservedCandidatesOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fetch-wechat-article",
+      "skill_name": "job-discovery",
+      "is_deliverable": true,
+      "artifact_type": "public_job_page",
+      "description": "OCR 抓取微信公众号图文（含 ReadGZH 镜像）为可提取文本与候选。微信图文正文是图片，普通页面抓取返回空内容——目标为 mp.weixin.qq.com 链接时使用本工具（fetch-public-job-pages 也已自动路由微信链接）；门控关闭时返回 needs_manual_review（reason ocr_disabled）。注意：单个微信链接失败（如镜像返回验证墙/付费墙、文章无正文）只代表该链接本身不可用，不代表其他微信文章链接也会失败——每篇独立尝试，其余链接仍应继续抓取。",
+      "input_model": {
+        "description": "One public WeChat article URL (mp.weixin.qq.com or a ReadGZH mirror).",
+        "properties": {
+          "url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          },
+          "out_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Out Dir"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "FetchWechatArticleInput",
+        "type": "object"
+      },
+      "output_model": {
+        "$defs": {
+          "ExtractedJobDetails": {
+            "description": "A normalized job DTO whose values remain traceable to one page artifact.",
+            "properties": {
+              "title": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Title"
+              },
+              "company_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Company Name"
+              },
+              "locations": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Locations",
+                "type": "array"
+              },
+              "responsibilities": {
+                "title": "Responsibilities",
+                "type": "string"
+              },
+              "requirements": {
+                "title": "Requirements",
+                "type": "string"
+              },
+              "recruitment_types": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Recruitment Types",
+                "type": "array"
+              },
+              "apply_url": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Apply Url"
+              },
+              "deadline_text": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Deadline Text"
+              },
+              "published_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Published At"
+              },
+              "confidence": {
+                "title": "Confidence",
+                "type": "number"
+              },
+              "evidence_refs": {
+                "items": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "title": "Evidence Refs",
+                "type": "array"
+              },
+              "normalization_warnings": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Normalization Warnings",
+                "type": "array"
+              },
+              "skills": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Skills",
+                "type": "array"
+              },
+              "min_degree": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Min Degree"
+              },
+              "priority": {
+                "default": "unknown",
+                "title": "Priority",
+                "type": "string"
+              },
+              "strength": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Strength"
+              },
+              "taxonomy": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Taxonomy",
+                "type": "array"
+              }
+            },
+            "required": [
+              "title",
+              "company_name",
+              "locations",
+              "responsibilities",
+              "requirements",
+              "recruitment_types",
+              "apply_url",
+              "deadline_text",
+              "confidence",
+              "evidence_refs",
+              "normalization_warnings"
+            ],
+            "title": "ExtractedJobDetails",
+            "type": "object"
+          }
+        },
+        "description": "OCR slice outcome; a usable text carries the standard page evidence.\n\nThe page-evidence keys (artifact_id / source_url / content_hash /\nvisible_text) mirror the fetch contract so a slice that produced text\nenters the observed-evidence pool through ``_with_observed_page``;\nslices without text carry None/\"\" and are never persisted as evidence.",
+        "properties": {
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/$defs/ExtractedJobDetails"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "ocr_text": {
+            "title": "Ocr Text",
+            "type": "string"
+          },
+          "needs_deep_crawl": {
+            "title": "Needs Deep Crawl",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "artifact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Artifact Id"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Url"
+          },
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content Hash"
+          },
+          "visible_text": {
+            "default": "",
+            "title": "Visible Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "status",
+          "channel",
+          "candidates",
+          "ocr_text",
+          "needs_deep_crawl",
+          "reason"
+        ],
+        "title": "FetchWechatArticleOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "deduplicate-observed-jobs",
+      "skill_name": "job-discovery",
+      "is_deliverable": null,
+      "artifact_type": null,
+      "description": "对已观察页面证据按 canonical 身份（job_id/apply_url/规范化标题）做 run 内确定性去重，返回 kept/removed。",
+      "input_model": {
+        "description": "A bounded set of observed evidence artifacts to dedupe in run order.",
+        "properties": {
+          "artifact_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Artifact Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "artifact_ids"
+        ],
+        "title": "DeduplicateObservedJobsInput",
+        "type": "object"
+      },
+      "output_model": {
+        "$defs": {
+          "DeduplicatedRemoval": {
+            "description": "One artifact dropped as duplicate (or unprocessable) by the tool.",
+            "properties": {
+              "artifact_id": {
+                "title": "Artifact Id",
+                "type": "string"
+              },
+              "reason": {
+                "title": "Reason",
+                "type": "string"
+              },
+              "detail": {
+                "title": "Detail",
+                "type": "string"
+              }
+            },
+            "required": [
+              "artifact_id",
+              "reason",
+              "detail"
+            ],
+            "title": "DeduplicatedRemoval",
+            "type": "object"
+          }
+        },
+        "description": "First-seen-wins kept list plus explicit removals with reasons.",
+        "properties": {
+          "kept": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Kept",
+            "type": "array"
+          },
+          "removed": {
+            "items": {
+              "$ref": "#/$defs/DeduplicatedRemoval"
+            },
+            "title": "Removed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kept",
+          "removed"
+        ],
+        "title": "DeduplicateObservedJobsOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "classify-job-url",
+      "skill_name": "job-discovery",
+      "is_deliverable": null,
+      "artifact_type": null,
+      "description": "对候选 URL 做低预算站点分类（wechat/adapter/static/spa/blocked，host 信号 + 4KB 探针，不启动浏览器）。",
+      "input_model": {
+        "description": "A bounded set of candidate URLs to classify before fetching.",
+        "properties": {
+          "urls": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Urls",
+            "type": "array"
+          }
+        },
+        "required": [
+          "urls"
+        ],
+        "title": "ClassifyJobUrlInput",
+        "type": "object"
+      },
+      "output_model": {
+        "$defs": {
+          "ClassifiedJobUrl": {
+            "description": "One URL's site class plus the signal that decided it.",
+            "properties": {
+              "url": {
+                "title": "Url",
+                "type": "string"
+              },
+              "site_class": {
+                "title": "Site Class",
+                "type": "string"
+              },
+              "evidence_signal": {
+                "title": "Evidence Signal",
+                "type": "string"
+              }
+            },
+            "required": [
+              "url",
+              "site_class",
+              "evidence_signal"
+            ],
+            "title": "ClassifiedJobUrl",
+            "type": "object"
+          }
+        },
+        "description": "Classification results in input order.",
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/$defs/ClassifiedJobUrl"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "title": "ClassifyJobUrlOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "match-observed-jobs",
+      "skill_name": "job-matching",
+      "is_deliverable": true,
+      "artifact_type": "job_matching_report",
+      "description": "对已观察 JD 按已确认能力、地点和可验证待遇/公司属性做透明匹配排序；推荐任务必须调用。",
+      "input_model": {
+        "description": "Confirmed user capabilities or preferences selected by the Executor.",
+        "properties": {
+          "profile_keywords": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 30,
+            "title": "Profile Keywords",
+            "type": "array"
+          },
+          "preferred_locations": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Preferred Locations",
+            "type": "array"
+          },
+          "ranking_criteria": {
+            "items": {
+              "enum": [
+                "skills",
+                "location",
+                "salary",
+                "recency",
+                "company_type"
+              ],
+              "type": "string"
+            },
+            "title": "Ranking Criteria",
+            "type": "array"
+          },
+          "limit": {
+            "default": 100,
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "normalization_warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Normalization Warnings",
+            "type": "array"
+          }
+        },
+        "title": "MatchObservedJobsInput",
+        "type": "object"
+      },
+      "output_model": {
+        "$defs": {
+          "ObservedJobMatch": {
+            "description": "A transparent score over one immutable public JD artifact.",
+            "properties": {
+              "artifact_id": {
+                "title": "Artifact Id",
+                "type": "string"
+              },
+              "candidate_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Candidate Id"
+              },
+              "source_artifact_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Source Artifact Id"
+              },
+              "source_url": {
+                "title": "Source Url",
+                "type": "string"
+              },
+              "title": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Title"
+              },
+              "score": {
+                "maximum": 100,
+                "minimum": 0,
+                "title": "Score",
+                "type": "integer"
+              },
+              "matched_keywords": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Matched Keywords",
+                "type": "array"
+              },
+              "matched_locations": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Matched Locations",
+                "type": "array"
+              },
+              "compensation_text": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Compensation Text"
+              },
+              "observed_company_types": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Observed Company Types",
+                "type": "array"
+              },
+              "unverified_ranking_criteria": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Unverified Ranking Criteria",
+                "type": "array"
+              },
+              "evidence_excerpt": {
+                "title": "Evidence Excerpt",
+                "type": "string"
+              }
+            },
+            "required": [
+              "artifact_id",
+              "source_url",
+              "title",
+              "score",
+              "matched_keywords",
+              "evidence_excerpt"
+            ],
+            "title": "ObservedJobMatch",
+            "type": "object"
+          }
+        },
+        "description": "Ranked output with no candidates outside the supplied evidence context.",
+        "properties": {
+          "matches": {
+            "items": {
+              "$ref": "#/$defs/ObservedJobMatch"
+            },
+            "title": "Matches",
+            "type": "array"
+          },
+          "unresolved_ranking_criteria": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unresolved Ranking Criteria",
+            "type": "array"
+          },
+          "evaluated_candidate_count": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Evaluated Candidate Count",
+            "type": "integer"
+          },
+          "evaluated_source_urls": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evaluated Source Urls",
+            "type": "array"
+          },
+          "no_match_reason": {
+            "anyOf": [
+              {
+                "const": "no_candidate_satisfied_constraints",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "No Match Reason"
+          }
+        },
+        "required": [
+          "matches"
+        ],
+        "title": "MatchObservedJobsOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "build-resume-tailoring-brief",
+      "skill_name": "resume-tailoring",
+      "is_deliverable": true,
+      "artifact_type": "resume_tailoring_brief",
+      "description": "基于已确认简历事实与一个 JD 生成不可虚构、可审阅的简历修改建议。",
+      "input_model": {
+        "description": "One evidence-backed target JD and the terms the Agent wants checked.",
+        "properties": {
+          "target_artifact_id": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Target Artifact Id",
+            "type": "string"
+          },
+          "target_keywords": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 30,
+            "minItems": 1,
+            "title": "Target Keywords",
+            "type": "array"
+          }
+        },
+        "required": [
+          "target_artifact_id",
+          "target_keywords"
+        ],
+        "title": "BuildResumeTailoringBriefInput",
+        "type": "object"
+      },
+      "output_model": {
+        "$defs": {
+          "ResumeTailoringDiff": {
+            "description": "One reviewable operation grounded in both a fact field and selected JD.",
+            "properties": {
+              "op": {
+                "enum": [
+                  "highlight",
+                  "reorder"
+                ],
+                "title": "Op",
+                "type": "string"
+              },
+              "section": {
+                "title": "Section",
+                "type": "string"
+              },
+              "fact_ref": {
+                "title": "Fact Ref",
+                "type": "string"
+              },
+              "target_evidence_ref": {
+                "title": "Target Evidence Ref",
+                "type": "string"
+              },
+              "change_summary": {
+                "title": "Change Summary",
+                "type": "string"
+              }
+            },
+            "required": [
+              "op",
+              "section",
+              "fact_ref",
+              "target_evidence_ref",
+              "change_summary"
+            ],
+            "title": "ResumeTailoringDiff",
+            "type": "object"
+          }
+        },
+        "description": "Fact-grounded resume changes that await user review before application.",
+        "properties": {
+          "target_artifact_id": {
+            "title": "Target Artifact Id",
+            "type": "string"
+          },
+          "target_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Title"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "source_attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Attribution"
+          },
+          "supported_keywords": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Supported Keywords",
+            "type": "array"
+          },
+          "missing_keywords": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Keywords",
+            "type": "array"
+          },
+          "safe_actions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Safe Actions",
+            "type": "array"
+          },
+          "proposed_diffs": {
+            "items": {
+              "$ref": "#/$defs/ResumeTailoringDiff"
+            },
+            "title": "Proposed Diffs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "target_artifact_id",
+          "target_title",
+          "source_url",
+          "supported_keywords",
+          "missing_keywords",
+          "safe_actions",
+          "proposed_diffs"
+        ],
+        "title": "ResumeTailoringBriefOutput",
+        "type": "object"
+      }
+    }
+  ]
+}
