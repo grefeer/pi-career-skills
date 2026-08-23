@@ -1,0 +1,53 @@
+[
+ {
+  "application_channel_json": {
+   "email": "apply@yunqi.example.com",
+   "gui_eligible": false,
+   "method": "email"
+  },
+  "apply_url": "https://yunqi.example.com/jobs/frontend",
+  "company_name": "深圳云启科技",
+  "confidence": 0.9999999999999999,
+  "deadline_text": null,
+  "department": "前端研发部",
+  "description_text": "1. 负责公司核心产品的前端开发，使用 Vue3、TypeScript、Vite 2. 参与组件库建设与性能优化 3. 与后端协作完成接口联调\n\n1. 本科及以上学历，计算机相关专业 2. 2 年以上前端开发经验，熟悉 Vue3、TypeScript、Vite 3. 熟悉 Git、Webpack 构建 薪资：15-25K·14薪 工作地点：深圳·南山 招聘类型：社会招聘 发布时间：2026-08-20 投递方式：apply@yunqi.example.com",
+  "evidence_refs": [],
+  "industries": [],
+  "locations": [
+   "深圳·南山"
+  ],
+  "min_degree": "本科",
+  "normalization_warnings": [],
+  "priority": "unknown",
+  "published_at": "2026-08-20",
+  "recruitment_types": [
+   "full_time"
+  ],
+  "referral_code": null,
+  "requirements": "1. 本科及以上学历，计算机相关专业 2. 2 年以上前端开发经验，熟悉 Vue3、TypeScript、Vite 3. 熟悉 Git、Webpack 构建 薪资：15-25K·14薪 工作地点：深圳·南山 招聘类型：社会招聘 发布时间：2026-08-20 投递方式：apply@yunqi.example.com",
+  "responsibilities": "1. 负责公司核心产品的前端开发，使用 Vue3、TypeScript、Vite 2. 参与组件库建设与性能优化 3. 与后端协作完成接口联调",
+  "skills": [],
+  "strength": {
+   "base_score": 5,
+   "evidence": [
+    {
+     "evidence": "本科及以上",
+     "label": "明确学历",
+     "weight": 1
+    },
+    {
+     "evidence": "熟悉 Vue",
+     "label": "明确技能栈",
+     "weight": 2
+    }
+   ],
+   "score": 3,
+   "tier": "medium"
+  },
+  "taxonomy": [
+   "开发",
+   "研发工程师"
+  ],
+  "title": "前端开发工程师"
+ }
+]

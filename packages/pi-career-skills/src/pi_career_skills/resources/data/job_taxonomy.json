@@ -1,0 +1,129 @@
+{
+  "description": "Reviewed two-level job taxonomy (FindJobs TaxonomyManager port, B2). Seeded from the archived _ROLE_FAMILY_MARKERS families (product/dev/design/algo/data/ops/test/security/research, git ea0a70b) and extended to 16 level-1 categories. Runtime classification is deterministic keyword scoring - never an LLM call (docs/findjobs-optimization-plan.zh-CN.md §5.2). Additions require human review; reviewer + date in the plan appendix.",
+  "version": 1,
+  "reviewed_at": null,
+  "reviewer": null,
+  "level1": [
+    {
+      "name": "产品",
+      "level2": [
+        { "name": "产品经理", "keywords": ["产品经理", "产品", "pm", "product manager"] },
+        { "name": "产品运营", "keywords": ["产品运营", "用户增长", "增长运营"] }
+      ]
+    },
+    {
+      "name": "开发",
+      "level2": [
+        { "name": "后端开发", "keywords": ["后端", "服务端", "server", "接口开发", "微服务"] },
+        { "name": "全栈开发", "keywords": ["全栈", "full stack"] },
+        { "name": "研发工程师", "keywords": ["研发", "开发", "开发工程师", "developer", "程序员", "engineer"] }
+      ]
+    },
+    {
+      "name": "前端",
+      "level2": [
+        { "name": "前端开发", "keywords": ["前端", "web前端", "网页开发"] },
+        { "name": "移动前端", "keywords": ["小程序", "h5", "移动web"] }
+      ]
+    },
+    {
+      "name": "客户端",
+      "level2": [
+        { "name": "客户端开发", "keywords": ["客户端", "app开发", "移动端"] },
+        { "name": "iOS开发", "keywords": ["ios", "objective-c", "swift"] },
+        { "name": "Android开发", "keywords": ["android", "安卓"] }
+      ]
+    },
+    {
+      "name": "算法",
+      "level2": [
+        { "name": "机器学习算法", "keywords": ["机器学习", "深度学习", "算法", "machine learning", "algorithm"] },
+        { "name": "推荐算法", "keywords": ["推荐系统", "ctr", "特征工程"] },
+        { "name": "NLP算法", "keywords": ["nlp", "自然语言处理"] },
+        { "name": "计算机视觉", "keywords": ["计算机视觉", "图像识别", "cv"] }
+      ]
+    },
+    {
+      "name": "数据",
+      "level2": [
+        { "name": "数据分析", "keywords": ["数据分析", "分析师", "数据", "analyst", "数据科学"] },
+        { "name": "数据工程", "keywords": ["数据工程", "数仓", "etl"] },
+        { "name": "大数据开发", "keywords": ["spark", "flink", "hadoop", "大数据"] }
+      ]
+    },
+    {
+      "name": "设计",
+      "level2": [
+        { "name": "UI设计", "keywords": ["ui", "ued", "界面设计", "设计"] },
+        { "name": "视觉设计", "keywords": ["视觉设计", "平面设计", "designer"] },
+        { "name": "交互设计", "keywords": ["交互设计", "ux", "体验设计"] }
+      ]
+    },
+    {
+      "name": "运营",
+      "level2": [
+        { "name": "用户运营", "keywords": ["用户运营", "社群运营", "社区运营", "运营"] },
+        { "name": "内容运营", "keywords": ["内容运营", "新媒体", "编辑"] },
+        { "name": "渠道运营", "keywords": ["渠道运营", "投放", "推广", "ops", "operation"] }
+      ]
+    },
+    {
+      "name": "测试",
+      "level2": [
+        { "name": "测试开发", "keywords": ["测试开发", "质量保障", "质量保证", "qa"] },
+        { "name": "功能测试", "keywords": ["功能测试", "测试", "测试工程师"] },
+        { "name": "自动化测试", "keywords": ["自动化测试", "接口测试", "性能测试"] }
+      ]
+    },
+    {
+      "name": "安全",
+      "level2": [
+        { "name": "安全研究", "keywords": ["渗透", "攻防", "漏洞", "安全", "security", "sec"] },
+        { "name": "安全开发", "keywords": ["安全开发", "风控", "安全工程师"] }
+      ]
+    },
+    {
+      "name": "研究",
+      "level2": [
+        { "name": "算法研究员", "keywords": ["研究员", "研究", "research", "scientist"] },
+        { "name": "科研", "keywords": ["科研", "论文", "实验室"] }
+      ]
+    },
+    {
+      "name": "嵌入式",
+      "level2": [
+        { "name": "嵌入式开发", "keywords": ["嵌入式", "单片机", "驱动开发"] },
+        { "name": "硬件开发", "keywords": ["硬件", "fpga", "芯片", "电路"] }
+      ]
+    },
+    {
+      "name": "运维",
+      "level2": [
+        { "name": "运维开发", "keywords": ["运维", "devops", "sre", "系统运维"] },
+        { "name": "基础设施", "keywords": ["基础设施", "容器化", "kubernetes", "云平台"] }
+      ]
+    },
+    {
+      "name": "项目管理",
+      "level2": [
+        { "name": "项目经理", "keywords": ["项目经理", "项目助理", "项目管理", "pmp"] },
+        { "name": "技术管理", "keywords": ["技术经理", "技术负责人", "团队管理"] }
+      ]
+    },
+    {
+      "name": "职能",
+      "level2": [
+        { "name": "人力资源", "keywords": ["人力资源", "hr", "招聘"] },
+        { "name": "财务", "keywords": ["财务", "会计", "审计"] },
+        { "name": "法务", "keywords": ["法务", "合规", "律师"] }
+      ]
+    },
+    {
+      "name": "销售市场",
+      "level2": [
+        { "name": "销售", "keywords": ["销售", "商务", "客户经理"] },
+        { "name": "市场", "keywords": ["市场", "品牌", "marketing", "市场推广"] }
+      ]
+    }
+  ]
+}

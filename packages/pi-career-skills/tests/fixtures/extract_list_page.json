@@ -1,0 +1,54 @@
+[
+ {
+  "application_channel_json": null,
+  "apply_url": "https://yunqi.example.com/jobs",
+  "company_name": null,
+  "confidence": 0.25,
+  "deadline_text": null,
+  "department": null,
+  "description_text": "深圳云启科技招聘\n1. 前端开发工程师\n   职责：负责 Vue3 项目开发；要求：2 年经验\n   地点：深圳\n2. 后端开发工程师\n   职责：负责 Java 服务端开发；要求：3 年经验\n   地点：深圳\n3. 算法工程师\n   职责：负责推荐算法；要求：硕士优先\n   地点：北京\n",
+  "evidence_refs": [],
+  "industries": [],
+  "locations": [
+   "深圳"
+  ],
+  "min_degree": "硕士",
+  "normalization_warnings": [
+   "No responsibilities or requirements sections found"
+  ],
+  "priority": "preferred",
+  "published_at": null,
+  "recruitment_types": [],
+  "referral_code": null,
+  "requirements": "",
+  "responsibilities": "",
+  "skills": [],
+  "strength": {
+   "base_score": 5,
+   "evidence": [
+    {
+     "evidence": "2 年经验",
+     "label": "明确年限要求",
+     "weight": 2
+    },
+    {
+     "evidence": "硕士",
+     "label": "明确学历",
+     "weight": 1
+    },
+    {
+     "evidence": "前端开发工程师；后端开发工程师；算法工程师",
+     "label": "明确职责清单",
+     "weight": 1
+    }
+   ],
+   "score": 4,
+   "tier": "medium"
+  },
+  "taxonomy": [
+   "开发",
+   "后端开发"
+  ],
+  "title": "1. 前端开发工程师"
+ }
+]

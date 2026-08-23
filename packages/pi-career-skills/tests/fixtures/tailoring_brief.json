@@ -1,0 +1,19 @@
+{
+ "missing_keywords": [
+  "vite",
+  "前端"
+ ],
+ "proposed_diffs": [],
+ "safe_actions": [
+  "在项目经历中优先展示已确认的 Vue3、TypeScript 事实，并量化可核验结果。",
+  "Vite、前端 尚无已确认事实：仅在能补充项目证据时添加，不得虚构。"
+ ],
+ "source_attribution": null,
+ "source_url": "https://yunqi.example.com/jobs/frontend",
+ "supported_keywords": [
+  "vue3",
+  "typescript"
+ ],
+ "target_artifact_id": "art1",
+ "target_title": null
+}

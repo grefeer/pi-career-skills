@@ -1,0 +1,37 @@
+[
+ {
+  "application_channel_json": null,
+  "apply_url": "https://yunqi.example.com/about",
+  "company_name": "。我们正在招聘",
+  "confidence": 0.45,
+  "deadline_text": null,
+  "department": null,
+  "description_text": "云启科技成立于 2018 年，是一家专注于企业级 SaaS 的公司。我们正在招聘\n开发工程师加入我们，负责公司产品的研发工作。公司福利包括五险一金、\n弹性工作、年度体检等。如有兴趣请联系 hr@yunqi.example.com。\n",
+  "evidence_refs": [],
+  "industries": [],
+  "locations": [],
+  "min_degree": null,
+  "normalization_warnings": [
+   "No responsibilities or requirements sections found",
+   "No location information found"
+  ],
+  "priority": "unknown",
+  "published_at": null,
+  "recruitment_types": [],
+  "referral_code": null,
+  "requirements": "",
+  "responsibilities": "",
+  "skills": [],
+  "strength": {
+   "base_score": 0,
+   "evidence": [],
+   "score": 0,
+   "tier": "low"
+  },
+  "taxonomy": [
+   "开发",
+   "研发工程师"
+  ],
+  "title": "开发工程师加入我们，负责公司产品"
+ }
+]

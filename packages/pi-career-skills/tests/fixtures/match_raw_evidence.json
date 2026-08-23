@@ -1,0 +1,28 @@
+{
+ "evaluated_candidate_count": 1,
+ "evaluated_source_urls": [
+  "https://liepin.example.com/jobs/frontend"
+ ],
+ "matches": [
+  {
+   "artifact_id": "raw1",
+   "candidate_id": null,
+   "compensation_text": null,
+   "evidence_excerpt": "前端开发工程师 深圳 负责 Vue3 TypeScript 开发 任职要求 2 年经验",
+   "matched_keywords": [
+    "vue3"
+   ],
+   "matched_locations": [
+    "深圳"
+   ],
+   "observed_company_types": [],
+   "score": 34,
+   "source_artifact_id": null,
+   "source_url": "https://liepin.example.com/jobs/frontend",
+   "title": null,
+   "unverified_ranking_criteria": []
+  }
+ ],
+ "no_match_reason": null,
+ "unresolved_ranking_criteria": []
+}

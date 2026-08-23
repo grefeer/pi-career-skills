@@ -1,0 +1,30 @@
+{
+ "evaluated_candidate_count": 1,
+ "evaluated_source_urls": [
+  "https://yunqi.example.com/jobs/frontend"
+ ],
+ "matches": [
+  {
+   "artifact_id": "art1",
+   "candidate_id": "art1:candidate:0",
+   "compensation_text": null,
+   "evidence_excerpt": "负责 Vue3、TypeScript 项目开发\n2 年以上前端经验，熟悉 Vue3、TypeScript、Vite",
+   "matched_keywords": [
+    "vue3",
+    "typescript",
+    "vite"
+   ],
+   "matched_locations": [
+    "深圳"
+   ],
+   "observed_company_types": [],
+   "score": 100,
+   "source_artifact_id": null,
+   "source_url": "https://yunqi.example.com/jobs/frontend",
+   "title": "前端开发工程师",
+   "unverified_ranking_criteria": []
+  }
+ ],
+ "no_match_reason": null,
+ "unresolved_ranking_criteria": []
+}
