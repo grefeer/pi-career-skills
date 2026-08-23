@@ -205,6 +205,19 @@ def test_discovery_not_completed_with_nav_label_details() -> None:
     assert discovery_completed(store) is False
 
 
+def test_discovery_not_completed_with_only_matching_report() -> None:
+    """An inherited (chain) matching report alone never completes discovery.
+
+    ``discovery_completed`` is type-scoped to ``public_job_page`` /
+    ``structured_job_details``: a run that needs discovery but holds only a
+    ``job_matching_report`` artifact has zero discovery evidence.
+    """
+    store = EvidenceStore()
+    store.add_observation(_matching_obs(has_matches=True))
+    assert store.job_bearing_artifacts()  # the report IS job-bearing...
+    assert discovery_completed(store) is False  # ...but it is not discovery
+
+
 # ---------------------------------------------------------------------------
 # Matching completion
 # ---------------------------------------------------------------------------
@@ -317,6 +330,42 @@ def test_run_waiting_empty_summary() -> None:
     status, err = policy.evaluate(state, store, summary="   ")
     assert status == "waiting_user"
     assert err == "completion_evidence_unavailable"
+
+
+def test_run_waiting_unresolved_summary_refs() -> None:
+    """Summary refs pointing at a missing artifact → waiting_user."""
+    # The refs-resolution check must have real state to read: this asserts the
+    # field exists on RunState so the check is live (would fail if the field
+    # regressed out of the dataclass).
+    assert "summary_refs" in RunState.__dataclass_fields__
+    store = EvidenceStore()
+    store.add_observation(_page_obs("jd_complete"))
+
+    state = _make_state(
+        status=RunStatus.running,
+        needed={"job-discovery"},
+    )
+    state.summary_refs = [{"artifact_id": "missing-id"}]
+    policy = RunCompletionPolicy()
+    status, err = policy.evaluate(state, store, summary="找到 1 个职位")
+    assert status == "waiting_user"
+    assert err == "completion_evidence_unavailable"
+
+
+def test_run_succeeded_with_resolving_summary_refs() -> None:
+    """Summary refs resolving to persisted artifacts → succeeded."""
+    store = EvidenceStore()
+    artifact = store.add_observation(_page_obs("jd_complete"))[0]
+
+    state = _make_state(
+        status=RunStatus.running,
+        needed={"job-discovery"},
+    )
+    state.summary_refs = [{"artifact_id": artifact.artifact_id}]
+    policy = RunCompletionPolicy()
+    status, err = policy.evaluate(state, store, summary="找到 1 个职位")
+    assert status == "succeeded"
+    assert err is None
 
 
 def test_run_waiting_passthrough() -> None:

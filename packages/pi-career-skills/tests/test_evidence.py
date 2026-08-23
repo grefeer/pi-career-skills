@@ -332,13 +332,29 @@ class TestMatchingReportValidation:
         store = EvidenceStore()
         output = {
             "matches": [],
-            "no_match_reason": "no_candidate_satisfied_location",
+            "no_match_reason": "no_candidate_satisfied_constraints",
             "evaluated_candidate_count": 3,
         }
         obs = _make_obs("match-observed-jobs", output)
         arts = store.add_observation(obs)
         assert len(arts) == 1
         assert _is_quality_job_bearing(arts[0])
+
+    def test_empty_matches_other_reason_not_job_bearing(self):
+        """A non-constraint no_match_reason must NOT label the report
+        job-bearing — only the exact ``no_candidate_satisfied_constraints``
+        value satisfies the completion gate."""
+        store = EvidenceStore()
+        output = {
+            "matches": [],
+            "no_match_reason": "some_other_reason",
+            "evaluated_candidate_count": 3,
+        }
+        obs = _make_obs("match-observed-jobs", output)
+        arts = store.add_observation(obs)
+        assert len(arts) == 1  # still persisted...
+        assert not _is_quality_job_bearing(arts[0])  # ...but low quality
+        assert arts[0].quality == "low_quality"
 
     def test_empty_matches_no_evaluation_trace_invalid(self):
         store = EvidenceStore()

@@ -50,6 +50,9 @@ class RunState:
     stall_streak: int = 0
     terminal: bool = False
     needed_skills: set[str] = field(default_factory=set)
+    #: Artifact references the run's summary claims; ``RunCompletionPolicy``
+    #: resolves each against ``EvidenceStore`` before declaring success.
+    summary_refs: list[dict[str, Any]] | None = None
     chain_context: dict[str, Any] | None = None
     feature_flags: dict[str, Any] = field(default_factory=dict)
     started_at_wall: float = field(default_factory=time.time)

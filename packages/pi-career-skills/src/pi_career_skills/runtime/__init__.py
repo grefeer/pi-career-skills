@@ -5,8 +5,9 @@ DeepAgents backend's kernel evidence sink, run state machine, and bounded
 event logger — ported for the pi-py parity runtime.
 """
 
+from ..contracts import RunEvent
 from . import evidence  # noqa: F401  (re-export via aliases below)
-from .events import EventLogger, RunEvent
+from .events import EventLogger
 from .state import RunState, RunStatus, mark_terminal, transition
 
 # Re-exported from evidence module

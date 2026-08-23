@@ -34,6 +34,11 @@ from .models import (
     ValidateObservedCandidatesOutput,
 )
 from .target_evidence import resolve_target_evidence
+from .title_validation import (
+    _extract_portal_role_text,
+    _infer_official_page_title,
+    _is_plausible_job_title,
+)
 
 # ---------------------------------------------------------------------------
 # validate-observed-candidates  constants
@@ -339,39 +344,6 @@ def _prepare_portal_extraction_text(text: str, source_url: str) -> str:
     return "\n".join(lines[start:end]).strip()
 
 
-def _infer_official_page_title(text: str) -> str | None:
-    """Recover a single-JD page's official title from the top of visible text."""
-    if not text:
-        return None
-    # Try the first non-empty, non-navigation line that looks like a title.
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    for line in lines[:15]:
-        if len(line) < 4 or len(line) > 80:
-            continue
-        if _is_plausible_job_title(line):
-            return line
-    return None
-
-
-def _is_plausible_job_title(value: object) -> bool:
-    """Very loose title check — rejects navigation chrome, not marginal JDs."""
-    if not isinstance(value, str):
-        return False
-    stripped = value.strip()
-    if not stripped or len(stripped) < 2 or len(stripped) > 120:
-        return False
-    nav_markers = (
-        "首页", "登录", "注册", "搜索", "菜单", "返回", "更多",
-        "公告", "通知", "下载", "关于", "联系我们",
-    )
-    if any(marker == stripped for marker in nav_markers):
-        return False
-    # A title should not read like a sentence.
-    return not (
-        "。" in stripped or stripped.endswith("？") or stripped.endswith("?")
-    )
-
-
 def _is_richer_official_title(inferred: str | None, extracted: str | None) -> bool:
     """True when the inferred page title is more specific than the extracted one."""
     if not inferred or not extracted:
@@ -578,11 +550,6 @@ def extract_observed_job_details(
         source_quality=source_quality,  # type: ignore[arg-type]
         candidates=candidates,
     )
-
-
-def _extract_portal_role_text(visible_text: str, source_url: str) -> str:
-    """Extract a portal's "岗位描述" / role summary if present."""
-    return ""
 
 
 # ---------------------------------------------------------------------------

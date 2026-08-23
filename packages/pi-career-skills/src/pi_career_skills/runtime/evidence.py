@@ -25,7 +25,6 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..contracts import Artifact, ToolObservation
-from .state import RunStatus  # noqa: F401  (used by test setup helpers)
 
 # ---------------------------------------------------------------------------
 # Local copies of registry / tool-adapter values.
@@ -206,9 +205,13 @@ def _validate_job_matching_report(content: Mapping[str, Any]) -> bool:
         return False
     if matches:
         return True
+    # The handler emits ``no_match_reason`` with the single literal
+    # ``no_candidate_satisfied_constraints`` (or the flag form) only, so any
+    # other reason (e.g. ``budget_exhausted``) must NOT label the report
+    # job-bearing — the completion gate requires the exact value too.
     has_reason = bool(
-        content.get("no_match_reason")
-        or content.get("no_candidate_satisfied_constraints")
+        content.get("no_candidate_satisfied_constraints")
+        or content.get("no_match_reason") == "no_candidate_satisfied_constraints"
     )
     has_trace = "evaluated_candidate_count" in content
     return has_reason and has_trace

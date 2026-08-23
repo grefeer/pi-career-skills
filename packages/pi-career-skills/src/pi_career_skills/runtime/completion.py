@@ -135,7 +135,9 @@ def discovery_completed(store: Any) -> bool:
         title + a real responsibilities/requirements body (≥20 chars).
     """
     return any(
-        _is_quality_job_bearing(artifact) for artifact in store.job_bearing_artifacts()
+        _is_quality_job_bearing(artifact)
+        for artifact in store.job_bearing_artifacts()
+        if artifact.artifact_type in {"public_job_page", "structured_job_details"}
     )
 
 
@@ -378,9 +380,11 @@ def matching_fallback(
             )
         raise
 
-    # Update stall guard with the outcome.
+    # Update stall guard with the outcome.  A succeeded ``match-observed-jobs``
+    # call always persists at least one report artifact (even an empty-match
+    # report is persisted), so ``status == "succeeded"`` is the produced signal.
     if tool_guard is not None:
-        produced = _observation_produced_artifact(observation)
+        produced = getattr(observation, "status", None) == "succeeded"
         tool_guard.note_call(
             "match-observed-jobs",
             "matching_fallback",
@@ -397,21 +401,6 @@ def _count_artifacts(store: Any) -> int:
     for _ in store.job_bearing_artifacts():
         count += 1
     return count
-
-
-def _observation_produced_artifact(observation: Any) -> bool:
-    """Best-effort check: did this observation produce a new artifact?
-
-    Used only for stall tracking inside ``matching_fallback``.  The
-    evidence store is the authority, but we can check the observation's
-    ``output.artifact_id`` as a fast signal.
-    """
-    output = getattr(observation, "output", None)
-    if output is None:
-        return False
-    if isinstance(output, Mapping):
-        return bool(output.get("artifact_id"))
-    return bool(getattr(output, "artifact_id", None))
 
 
 __all__ = [

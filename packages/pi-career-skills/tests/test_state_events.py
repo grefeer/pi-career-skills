@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from pi_career_skills.contracts import RunEvent
 from pi_career_skills.errors import CareerToolError
 from pi_career_skills.runtime.events import EventLogger
 from pi_career_skills.runtime.state import RunState, RunStatus, mark_terminal, transition
@@ -132,3 +133,30 @@ class TestEventLogger:
         log.append("b", {})
         assert len(snap) == 1
         assert len(log.events()) == 2
+
+    def test_events_carry_constructor_run_and_attempt_id(self):
+        log = EventLogger(run_id="r1", attempt_id="a1")
+        log.append("step_started", {})
+        event = log.events()[0]
+        assert event.run_id == "r1"
+        assert event.attempt_id == "a1"
+
+    def test_events_default_run_attempt_ids(self):
+        log = EventLogger()
+        log.append("step_started", {})
+        event = log.events()[0]
+        assert event.run_id == ""
+        assert event.attempt_id is None
+
+    def test_events_are_contracts_run_event(self):
+        """The emitted record IS pi_career_skills.contracts.RunEvent — the
+        single canonical event type; the local shadowing variant is gone."""
+        log = EventLogger(run_id="r1")
+        log.append("step_started", {"k": "v"})
+        event = log.events()[0]
+        assert isinstance(event, RunEvent)
+        assert event.payload == {"k": "v"}
+        # Same type identity as the package-level export.
+        from pi_career_skills.runtime import RunEvent as RuntimeRunEvent
+
+        assert RuntimeRunEvent is RunEvent
