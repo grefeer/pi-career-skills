@@ -287,17 +287,41 @@ def _make_state(
 
 
 def test_run_succeeded_all_skills_done_summary_present() -> None:
-    """All needed skills complete + non-empty summary → succeeded."""
+    """All needed skills complete + non-empty summary + resolving ref
+    → succeeded (source ANY-semantics: at least one ref must resolve to a
+    job-bearing artifact)."""
     store = EvidenceStore()
-    store.add_observation(_page_obs("jd_complete"))
+    page = store.add_observation(_page_obs("jd_complete"))[0]
     store.add_observation(_matching_obs(has_matches=True))
 
     state = _make_state(
         status=RunStatus.running,
         needed={"job-discovery", "job-matching"},
     )
+    state.summary_refs = [{"artifact_id": page.artifact_id}]
     policy = RunCompletionPolicy()
     status, err = policy.evaluate(state, store, summary="找到 1 个匹配职位")
+    assert status == "succeeded"
+    assert err is None
+
+
+def test_run_succeeded_mixed_refs_any_semantics() -> None:
+    """A non-resolving routing-evidence ref does NOT fail the run when at
+    least one other ref resolves (Q045 regression: valid jd_complete pages
+    + low-quality shell refs in the store tail)."""
+    store = EvidenceStore()
+    page = store.add_observation(_page_obs("jd_complete"))[0]
+
+    state = _make_state(
+        status=RunStatus.running,
+        needed={"job-discovery"},
+    )
+    state.summary_refs = [
+        {"artifact_id": "shell-artifact-1"},  # routing evidence — ignored
+        {"artifact_id": page.artifact_id},  # real deliverable — anchors
+    ]
+    policy = RunCompletionPolicy()
+    status, err = policy.evaluate(state, store, summary="找到 1 个职位")
     assert status == "succeeded"
     assert err is None
 

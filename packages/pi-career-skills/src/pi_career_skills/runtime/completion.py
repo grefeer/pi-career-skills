@@ -268,25 +268,28 @@ class RunCompletionPolicy:
         if not bounded:
             return ("waiting_user", "completion_evidence_unavailable")
 
-        # Summary refs — if the state declares any refs, they must resolve.
+        # Summary refs — source ``CareerCompletionPolicy`` uses ANY semantics:
+        # a run succeeds when at least one of its evidence refs resolves to a
+        # job-bearing artifact.  Refs pointing at routing evidence (low-quality
+        # shells, non-deliverable pages) are ignored, never a failure.  With no
+        # resolving ref the run stays ``waiting_user`` (source: ``succeeded``
+        # requires ``summary and has_job_bearing_ref``).
         refs = getattr(state, "summary_refs", None) or []
-        if refs:
-            persisted_ids = {a.artifact_id for a in store.job_bearing_artifacts()}
-            persisted_hashes = {a.content_hash for a in store.job_bearing_artifacts()}
-            for ref in refs:
-                if isinstance(ref, Mapping):
-                    ref_id = ref.get("artifact_id")
-                    ref_hash = ref.get("content_hash")
-                else:
-                    ref_id = ref
-                    ref_hash = None
-                if ref_id and ref_id in persisted_ids:
-                    continue
-                if ref_hash and ref_hash in persisted_hashes:
-                    continue
-                return ("waiting_user", "completion_evidence_unavailable")
+        persisted_ids = {a.artifact_id for a in store.job_bearing_artifacts()}
+        persisted_hashes = {a.content_hash for a in store.job_bearing_artifacts()}
+        for ref in refs:
+            if isinstance(ref, Mapping):
+                ref_id = ref.get("artifact_id")
+                ref_hash = ref.get("content_hash")
+            else:
+                ref_id = ref
+                ref_hash = None
+            if (ref_id and ref_id in persisted_ids) or (
+                ref_hash and ref_hash in persisted_hashes
+            ):
+                return ("succeeded", None)
 
-        return ("succeeded", None)
+        return ("waiting_user", "completion_evidence_unavailable")
 
 
 def terminal_guard(state: Any) -> None:
