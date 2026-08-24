@@ -237,6 +237,70 @@ class BudgetTracker:
         else:
             self._consumed.wall_clock_seconds = consumed.wall_clock_seconds
 
+    def child(self, limits: BudgetLimits) -> DelegationBudgetTracker:
+        """Create a per-delegation tracker bounded by this run tracker."""
+        return DelegationBudgetTracker(self, limits)
+
+
+class DelegationBudgetTracker:
+    """Child budget that charges both its local quota and the run ceiling."""
+
+    def __init__(self, parent: BudgetTracker, limits: BudgetLimits) -> None:
+        self._parent = parent
+        self._local = BudgetTracker(limits)
+
+    @property
+    def limits(self) -> BudgetLimits:
+        return self._local.limits
+
+    def consume_turn(self) -> None:
+        self._local.consume_turn()
+        try:
+            self._parent.consume_turn()
+        except Exception:
+            self._local._consumed.agent_turns -= 1
+            raise
+
+    def consume_tool_call(self, artifact_count: int = 0) -> None:
+        self._local.consume_tool_call(artifact_count)
+        try:
+            self._parent.consume_tool_call(artifact_count)
+        except Exception:
+            self._local._consumed.tool_calls -= 1
+            raise
+
+    def consume_model_request(self, tokens: int = 0) -> None:
+        self._local.consume_model_request(tokens)
+        try:
+            self._parent.consume_model_request(tokens)
+        except Exception:
+            self._local._consumed.model_requests -= 1
+            self._local._consumed.input_tokens = max(0, self._local._consumed.input_tokens - max(0, tokens))
+            raise
+
+    def consume_input_tokens(self, n: int) -> None:
+        self._local.consume_input_tokens(n)
+        try:
+            self._parent.consume_input_tokens(n)
+        except Exception:
+            self._local._consumed.input_tokens = max(0, self._local._consumed.input_tokens - max(0, n))
+            raise
+
+    def wall_clock_exhausted(self) -> bool:
+        return self._local.wall_clock_exhausted() or self._parent.wall_clock_exhausted()
+
+    def mark_attempt_started(self) -> None:
+        self._local.mark_attempt_started()
+
+    def mark_attempt_finished(self) -> None:
+        self._local.mark_attempt_finished()
+
+    def consumed(self) -> BudgetConsumed:
+        return self._local.consumed()
+
+    def remaining(self) -> BudgetConsumed:
+        return self._local.remaining()
+
 
 class ToolCallGuard:
     """Duplicate-call detection and stall-progress tracking per run.
@@ -347,5 +411,6 @@ __all__ = [
     "BudgetLimits",
     "BudgetConsumed",
     "BudgetTracker",
+    "DelegationBudgetTracker",
     "ToolCallGuard",
 ]

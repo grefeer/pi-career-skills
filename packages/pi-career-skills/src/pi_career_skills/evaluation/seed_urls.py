@@ -1,13 +1,20 @@
-"""Per-question seed URL map — VERBATIM port from source parity_support.py.
+"""Per-question seed URL map — source-parity seeds plus local skill support.
 
-The SEED_URLS mapping and ALL_SKILLS list are copied byte-for-byte from
+The SEED_URLS mapping is copied byte-for-byte from
 ``tests/question/parity_support.py`` in the source project to guarantee
-evaluation parity.  Do NOT "improve" the URLs or notes.
+evaluation parity.  ``ALL_SKILLS`` intentionally includes the migrated
+``career-planning`` capability even though it requires no seed URLs.
+Do NOT "improve" the URLs or notes.
 """
 
 from __future__ import annotations
 
-ALL_SKILLS: list[str] = ["job-discovery", "job-matching", "resume-tailoring"]
+ALL_SKILLS: list[str] = [
+    "job-discovery",
+    "job-matching",
+    "resume-tailoring",
+    "career-planning",
+]
 
 _LIEPIN_ROLE_URLS = {
     "frontend": "https://www.liepin.com/zpqiandongruanjiankaifagongchengshi/",

@@ -12,6 +12,7 @@ import os
 import time
 import uuid
 from collections.abc import Callable
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -165,24 +166,21 @@ def _inherited_goal_supplement(
 ) -> str:
     """Render a compact, model-visible summary of inherited chain data.
 
-    Uses the exact template strings 【上一环节已收集的岗位】 and
-    【候选人已确认事实（简历）】 from the source chain runner.
+    Uses reference-only inherited job context. Business fields remain in
+    persisted seed artifacts and are never copied into the downstream goal.
     """
     lines: list[str] = []
     if structured_candidates:
-        lines.append("【上一环节已收集的岗位】")
-        for candidate in structured_candidates[:8]:
-            title = (candidate.get("title") or "未命名岗位").strip()
-            company = (candidate.get("company") or "").strip()
-            location = "、".join(candidate.get("locations") or [])
-            candidate_id = (candidate.get("candidate_id") or "").strip()
-            parts = [part for part in (title, company, location) if part]
-            if candidate_id:
-                lines.append(
-                    f"- {'｜'.join(parts)}（证据 artifact: {candidate_id}）"
-                )
-            else:
-                lines.append(f"- {'｜'.join(parts)}")
+        refs = [
+            str(candidate.get("candidate_id") or candidate.get("artifact_id"))
+            for candidate in structured_candidates[:8]
+            if candidate.get("candidate_id") or candidate.get("artifact_id")
+        ]
+        lines.append(
+            "【上一环节已收集的岗位】已持久化 "
+            f"{len(structured_candidates)} 条候选，见 seed artifacts；"
+            + ("证据 refs: " + ", ".join(refs) if refs else "")
+        )
     if profile_facts:
         lines.append("【候选人已确认事实（简历）】")
         for key, value in list(profile_facts.items())[:12]:
@@ -250,7 +248,7 @@ def _build_seed_artifacts(
                     source_url=first.get("source_url"),
                     content_hash=first.get("content_hash"),
                     quality=first.get("source_quality") or "jd_complete",
-                    content={"candidates": cands},
+                    content={"candidates": deepcopy(cands)},
                 )
             )
     return seeds
@@ -310,6 +308,8 @@ async def run_chain(
         # Build the task goal.
         goal = link_doc.get("question", "")
         seed_artifacts: list[Artifact] | None = None
+        inherited_evidence: list[dict] = []
+        structured_candidates: list[dict] = []
 
         if index > 1 and link_records:
             prev = link_records[-1]
@@ -362,7 +362,11 @@ async def run_chain(
             needed_skills=needed_skills,
             budget=BudgetLimits(wall_clock_seconds=900),
             seed_artifacts=seed_artifacts,
-            private_context={"confirmed_profile_facts": profile_facts},
+            private_context={
+                "confirmed_profile_facts": dict(profile_facts),
+                "observed_public_evidence": deepcopy(inherited_evidence),
+                "structured_job_candidates": deepcopy(structured_candidates),
+            },
         )
 
         controller = factory()

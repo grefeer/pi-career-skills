@@ -21,6 +21,8 @@ from typing import Any
 from pi_agent_core import Agent
 from pi_ai import AssistantMessage, Model, ToolResultMessage
 
+from ..agents.capabilities import CAPABILITY_REGISTRY
+from ..agents.contracts import AgentTask
 from ..agents.delegation_tools import DelegationOutcome, DelegationRunner
 from ..agents.factory import build_skill_agent, build_supervisor_agent
 from ..context import ToolContext
@@ -41,10 +43,16 @@ from .budgets import BudgetConsumed, BudgetLimits, BudgetTracker, ToolCallGuard
 from .completion import (
     RunCompletionPolicy,
     _bounded_summary,
+    career_planning_completed,
     discovery_completed,
     matching_completed,
     matching_fallback,
     tailoring_completed,
+)
+from .context_projection import (
+    RuntimeContextProjection,
+    safe_private_context,
+    seed_artifact,
 )
 from .events import EventLogger
 from .evidence import EvidenceStore
@@ -56,8 +64,34 @@ _SKILL_CHECKERS: dict[str, Callable[[Any], bool]] = {
     "job-discovery": discovery_completed,
     "job-matching": matching_completed,
     "resume-tailoring": tailoring_completed,
+    "career-planning": career_planning_completed,
 }
 
+
+def _child_budget_limits(skill: str) -> BudgetLimits:
+    """Convert registry defaults into a bounded child budget."""
+    defaults = CAPABILITY_REGISTRY.require(skill).default_budget
+    return BudgetLimits(
+        agent_turns=int(defaults["agent_turns"]),
+        initial_tool_calls=int(defaults["tool_calls"]),
+        model_requests=int(defaults["model_requests"]),
+        input_tokens=int(defaults["input_tokens"]),
+        wall_clock_seconds=int(defaults["wall_clock_seconds"]),
+        auto_recoveries=0,
+    )
+
+
+def _delegation_status_for_error(error_code: str) -> str:
+    """Map trusted error codes to supervisor-decision states."""
+    if error_code in {TARGET_EVIDENCE_NOT_FOUND, DELEGATION_SKILL_NOT_ALLOWED}:
+        return "blocked"
+    if error_code == DELEGATION_SKILL_ALREADY_SUCCEEDED:
+        return "partial"
+    if error_code in {"budget_exhausted", "no_progress", "timeout", "rate_limited"}:
+        return "retryable"
+    if error_code in {"needs_user", "manual_review_required"}:
+        return "need_user"
+    return "failed"
 
 @dataclass
 class RunRequest:
@@ -70,6 +104,7 @@ class RunRequest:
         "job-discovery",
         "job-matching",
         "resume-tailoring",
+        "career-planning",
     )
     needed_skills: tuple[str, ...] | None = None
     budget: BudgetLimits | None = None
@@ -111,12 +146,18 @@ class CareerRunController:
         *,
         registry: Any | None = None,
         get_api_key: Callable[[str], str | None] | None = None,
+        models: dict[str, Model] | None = None,
     ) -> None:
         self._model = model
+        self._models = dict(models or {})
         self._registry = (
             registry if registry is not None else build_career_tool_registry()
         )
         self._get_api_key = get_api_key or _default_get_api_key
+
+    def _model_for(self, agent_name: str) -> Model:
+        """Resolve an optional per-agent model, falling back to the run model."""
+        return self._models.get(agent_name, self._model)
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -128,6 +169,9 @@ class CareerRunController:
         api_key = self._get_api_key(self._model.provider)
         if self._model.provider == "deepseek" and not api_key:
             return self._failed_key_missing(request)
+        for routed_model in self._models.values():
+            if routed_model.provider == "deepseek" and not self._get_api_key(routed_model.provider):
+                return self._failed_key_missing(request, provider=routed_model.provider)
 
         # 2. Per-run state.
         run_id = request.run_id or uuid.uuid4().hex
@@ -198,7 +242,7 @@ class CareerRunController:
 
             # Build per-skill runners for delegation.
             runners: dict[str, DelegationRunner] = {}
-            private_ctx = dict(request.private_context or {})
+            private_ctx = safe_private_context(request.private_context)
             for skill in allowed_skills:
                 runners[skill] = self._make_runner_for_skill(
                     skill=skill,
@@ -216,7 +260,7 @@ class CareerRunController:
 
             # Build fresh supervisor via the factory.
             supervisor = build_supervisor_agent(
-                self._model,
+                self._model_for("supervisor"),
                 runners,
                 allowed_skills=allowed_skills,
                 registry=self._registry,
@@ -245,6 +289,20 @@ class CareerRunController:
                 ):
                     hooks.agent_ref_box[0] = supervisor
                     await supervisor.continue_()
+
+                # Some pi-agent-core versions suppress the supervisor
+                # callback for legacy terminal delegate results.  Completion
+                # state is authoritative, so retain an auditable event.
+                observed_events = event_log.events()
+                if state.completed_skills and not any(
+                    event.type.startswith("delegation_")
+                    for event in observed_events
+                ):
+                    for completed_skill in sorted(state.completed_skills):
+                        event_log.append(
+                            "delegation_success",
+                            {"skill": completed_skill, "error_code": ""},
+                        )
 
                 outcome_status, outcome_code, outcome_msg = self._decide_outcome(
                     state=state,
@@ -351,7 +409,7 @@ class CareerRunController:
     # Fast-fail helpers
     # ------------------------------------------------------------------
 
-    def _failed_key_missing(self, request: RunRequest) -> RunResult:
+    def _failed_key_missing(self, request: RunRequest, *, provider: str = "deepseek") -> RunResult:
         """Return a failed result with zero attempts — no model loop."""
         run_id = request.run_id or uuid.uuid4().hex
         return RunResult(
@@ -359,7 +417,7 @@ class CareerRunController:
             status="failed",
             summary=None,
             error_code=MODEL_API_KEY_MISSING,
-            error_message="API key missing for provider deepseek",
+            error_message=f"API key missing for provider {provider}",
             attempt_count=0,
             completed_skills=[],
             refs=[],
@@ -373,60 +431,8 @@ class CareerRunController:
     # ------------------------------------------------------------------
 
     def _seed_artifact(self, store: EvidenceStore, artifact: Any) -> None:
-        """Seed a pre-existing artifact into the evidence store (idempotent).
-
-        We go through add_observation by constructing a synthetic succeeded
-        observation.  This ensures dedup and quality gates apply normally.
-
-        The output shape is per-type so ``_extract_candidates`` promotes
-        exactly the right number of artifacts — no spurious shells.
-        """
-        from ..contracts import ToolObservation
-
-        content = artifact.content or {}
-        atype = artifact.artifact_type
-
-        if atype == "structured_job_details":
-            # Real extract output is a batch with ``details`` list; each detail
-            # carries its own source_url / content_hash / candidates.  We
-            # build the same shape so ``_extract_candidates`` promotes each
-            # detail as one structured_job_details artifact.
-            candidates = content.get("candidates") or content.get("details") or []
-            detail: dict[str, Any] = {
-                "source_url": artifact.source_url or "",
-                "content_hash": artifact.content_hash or "",
-                "source_quality": artifact.quality or "jd_complete",
-                "candidates": candidates,
-            }
-            output: dict[str, Any] = {"details": [detail]}
-        else:
-            # public_job_page, job_matching_report, resume_tailoring_brief,
-            # job_search_results — top-level source_url + content_hash plus
-            # spread content is the correct shape.
-            output = {
-                "source_url": artifact.source_url or "",
-                "content_hash": artifact.content_hash or "",
-            }
-            if artifact.quality:
-                output["quality"] = artifact.quality
-            output.update(content)
-
-        obs = ToolObservation(
-            tool_name=self._tool_for_artifact_type(atype),
-            status="succeeded",
-            output=output,
-        )
-        store.add_observation(obs)
-
-    @staticmethod
-    def _tool_for_artifact_type(artifact_type: str) -> str:
-        mapping = {
-            "public_job_page": "fetch-public-job-pages",
-            "structured_job_details": "extract-observed-job-details-batch",
-            "job_matching_report": "match-observed-jobs",
-            "resume_tailoring_brief": "build-resume-tailoring-brief",
-        }
-        return mapping.get(artifact_type, "fetch-public-job-pages")
+        """Seed a chain artifact through the runtime evidence boundary."""
+        seed_artifact(store, artifact)
 
     # ------------------------------------------------------------------
     # Per-skill delegation runner factory
@@ -453,10 +459,11 @@ class CareerRunController:
         so it must be a sync callable.  It uses ``asyncio.run`` internally to
         drive the skill agent loop.
         """
-        captured_private = dict(private_context or {})
+        captured_private = safe_private_context(private_context)
 
-        def runner(task_goal: str, params: dict[str, Any]) -> DelegationOutcome:
-            return asyncio.run(
+        def runner(task_goal: AgentTask | str, params: dict[str, Any]) -> DelegationOutcome:
+            event_count = len(event_log.events())
+            outcome = asyncio.run(
                 self._run_skill_delegation(
                     skill=skill,
                     task_goal=task_goal,
@@ -473,6 +480,20 @@ class CareerRunController:
                     private_context=captured_private,
                 )
             )
+            # pi-agent-core does not invoke ``after_tool_call`` for legacy
+            # terminal tool results.  Record the delegation at this runtime
+            # boundary as a fallback, while avoiding duplicates when the hook
+            # already observed a structured result.
+            new_events = event_log.events()[event_count:]
+            if not any(event.type.startswith("delegation_") for event in new_events):
+                event_log.append(
+                    f"delegation_{outcome.status.value}",
+                    {
+                        "skill": skill,
+                        "error_code": outcome.error_code or "",
+                    },
+                )
+            return outcome
 
         return runner
 
@@ -484,7 +505,7 @@ class CareerRunController:
         self,
         *,
         skill: str,
-        task_goal: str,
+        task_goal: AgentTask | str,
         params: dict[str, Any],
         state: RunState,
         store: EvidenceStore,
@@ -499,19 +520,20 @@ class CareerRunController:
     ) -> DelegationOutcome:
         """Run one skill delegation — the real skill agent loop."""
         del params
+        task = task_goal if isinstance(task_goal, AgentTask) else AgentTask(objective=task_goal)
 
         # a. Validation (§6.7).
         if skill not in allowed_skills:
             return DelegationOutcome(
                 skill=skill,
-                status="error",
+                status=_delegation_status_for_error(DELEGATION_SKILL_NOT_ALLOWED),
                 error_code=DELEGATION_SKILL_NOT_ALLOWED,
             )
 
         if skill in state.completed_skills:
             return DelegationOutcome(
                 skill=skill,
-                status="error",
+                status=_delegation_status_for_error(DELEGATION_SKILL_ALREADY_SUCCEEDED),
                 error_code=DELEGATION_SKILL_ALREADY_SUCCEEDED,
             )
 
@@ -519,62 +541,87 @@ class CareerRunController:
         if not _skill_has_evidence(skill, store):
             return DelegationOutcome(
                 skill=skill,
-                status="error",
+                status=_delegation_status_for_error(TARGET_EVIDENCE_NOT_FOUND),
                 error_code=TARGET_EVIDENCE_NOT_FOUND,
             )
 
-        # b. Fresh skill agent per delegation (§4.2).
+        projection = RuntimeContextProjection(private_context)
         ctx = ToolContext(
             user_id=state.synthetic_user_id,
             run_id=state.run_id,
             attempt_id=attempt_id,
             skill_name=skill,
-            metadata=dict(private_context or {}),
+            metadata=projection.initial_metadata(store),
         )
-        skill_agent = build_skill_agent(
-            skill,
-            self._model,
-            ctx,
-            registry=self._registry,
-            stream_fn=hooks.stream_fn,
-            get_api_key=self._get_api_key,
-            before_tool_call=hooks.before_tool_call,
-            after_tool_call=hooks.after_tool_call,
-            should_stop_after_turn=hooks.should_stop_after_turn,
+        ctx.metadata["task_goal"] = task.objective
+        ctx.metadata["delegation_task"] = task.to_dict()
+        def refresh_callback() -> None:
+            projection.refresh(ctx.metadata, store)
+
+        hooks.context_refresh_box[0] = refresh_callback
+        child_limits = _child_budget_limits(skill)
+        child_tracker = (
+            tracker.child(child_limits)
+            if hasattr(tracker, "child")
+            else tracker
         )
-
-        # c. Reset stall streak on delegation boundary (§7.2).
-        guard.reset_stall_on_delegation()
-
-        # d. Drive the skill agent.
-        hooks.agent_ref_box[0] = skill_agent
-        await skill_agent.prompt(task_goal)
-
-        # If a halt fired inside the skill agent → return as error.
-        if halt_box[0] is not None:
-            halt_code, halt_msg = halt_box[0]
-            return DelegationOutcome(
-                skill=skill,
-                status="error",
-                error_code=halt_code,
-                summary=halt_msg,
+        skill_hooks = build_controller_hooks(
+            tracker=child_tracker,
+            guard=guard,
+            store=store,
+            event_log=event_log,
+            halt_box=halt_box,
+        )
+        skill_hooks.context_refresh_box[0] = refresh_callback
+        try:
+            skill_agent = build_skill_agent(
+                skill,
+                self._model_for(skill),
+                ctx,
+                registry=self._registry,
+                stream_fn=skill_hooks.stream_fn,
+                get_api_key=self._get_api_key,
+                before_tool_call=skill_hooks.before_tool_call,
+                after_tool_call=skill_hooks.after_tool_call,
+                should_stop_after_turn=skill_hooks.should_stop_after_turn,
             )
 
-        # e. Success: extract bounded summary + refs, check completion.
-        final_text = _last_assistant_text(skill_agent)
-        bounded = _bounded_summary(final_text)
-        refs = store.refs()
+            guard.reset_stall_on_delegation()
 
-        checker = _SKILL_CHECKERS.get(skill)
-        if checker is not None and checker(store):
-            state.completed_skills.add(skill)
+            # d. Drive the skill agent.
+            skill_hooks.agent_ref_box[0] = skill_agent
+            await skill_agent.prompt(task.objective)
 
-        return DelegationOutcome(
-            skill=skill,
-            status="succeeded",
-            summary=bounded,
-            refs=refs,
-        )
+            # If a halt fired inside the skill agent → return as error.
+            if halt_box[0] is not None:
+                halt_code, halt_msg = halt_box[0]
+                return DelegationOutcome(
+                    skill=skill,
+                    status=_delegation_status_for_error(halt_code),
+                    error_code=halt_code,
+                    summary=halt_msg,
+                )
+
+            # e. Success: extract bounded summary + refs, check completion.
+            final_text = _last_assistant_text(skill_agent)
+            bounded = _bounded_summary(final_text)
+            refs = store.refs()
+
+            checker = _SKILL_CHECKERS.get(skill)
+            if checker is not None and checker(store):
+                state.completed_skills.add(skill)
+
+            return DelegationOutcome(
+                skill=skill,
+                status="succeeded",
+                summary=bounded,
+                refs=refs,
+            )
+        finally:
+            if hooks.context_refresh_box[0] is refresh_callback:
+                hooks.context_refresh_box[0] = None
+            if skill_hooks.context_refresh_box[0] is refresh_callback:
+                skill_hooks.context_refresh_box[0] = None
 
     # ------------------------------------------------------------------
     # Outcome decision
@@ -617,11 +664,13 @@ class CareerRunController:
 
         # Matching fallback (§6.6) — deterministic one-shot.
         if _needs_matching_fallback(state, store, request):
+            fallback_projection = RuntimeContextProjection(request.private_context)
             kernel_ctx = ToolContext(
                 user_id=state.synthetic_user_id,
                 run_id=state.run_id,
                 attempt_id=attempt_id,
                 skill_name=None,
+                metadata=fallback_projection.initial_metadata(store),
             )
             with contextlib.suppress(CareerToolError):
                 matching_fallback(
@@ -748,6 +797,8 @@ def _skill_has_evidence(skill: str, store: EvidenceStore) -> bool:
         return False
     if skill == "resume-tailoring":
         # Need at least one job-bearing artifact.
+        return bool(store.job_bearing_artifacts())
+    if skill == "career-planning":
         return bool(store.job_bearing_artifacts())
     return True
 

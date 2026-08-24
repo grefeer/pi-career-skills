@@ -1,6 +1,6 @@
 {
   "schema_version": "pi_contract_v1",
-  "tool_count": 12,
+  "tool_count": 13,
   "tools": [
     {
       "name": "extract-observed-job-details-batch",
@@ -2236,6 +2236,301 @@
           "proposed_diffs"
         ],
         "title": "ResumeTailoringBriefOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "build-preparation-plan",
+      "skill_name": "career-planning",
+      "is_deliverable": true,
+      "artifact_type": "career_preparation_plan",
+      "description": "基于已观察目标 JD 生成可审阅、可追溯的求职准备计划；不得捏造截止日期或执行投递。",
+      "input_model": {
+        "description": "One persisted JD plus user-selected topics to validate against it.",
+        "properties": {
+          "target_artifact_id": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Target Artifact Id",
+            "type": "string"
+          },
+          "focus_keywords": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 30,
+            "minItems": 1,
+            "title": "Focus Keywords",
+            "type": "array"
+          },
+          "time_budget_hours": {
+            "default": 6,
+            "maximum": 80,
+            "minimum": 1,
+            "title": "Time Budget Hours",
+            "type": "integer"
+          },
+          "target_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Date"
+          },
+          "additional_target_artifact_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Additional Target Artifact Ids",
+            "type": "array"
+          },
+          "resume_skills": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Resume Skills",
+            "type": "array"
+          },
+          "gap_limit": {
+            "default": 5,
+            "maximum": 20,
+            "minimum": 1,
+            "title": "Gap Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "target_artifact_id",
+          "focus_keywords"
+        ],
+        "title": "BuildPreparationPlanInput",
+        "type": "object"
+      },
+      "output_model": {
+        "$defs": {
+          "PreparationPlanItem": {
+            "description": "One bounded, reviewable action supported by the selected JD.",
+            "properties": {
+              "topic": {
+                "title": "Topic",
+                "type": "string"
+              },
+              "priority": {
+                "enum": [
+                  "P0",
+                  "P1"
+                ],
+                "title": "Priority",
+                "type": "string"
+              },
+              "time_budget_hours": {
+                "minimum": 1,
+                "title": "Time Budget Hours",
+                "type": "integer"
+              },
+              "due_date": {
+                "anyOf": [
+                  {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Due Date"
+              },
+              "relative_order": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "first",
+                      "then"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Relative Order"
+              },
+              "completion_criteria": {
+                "title": "Completion Criteria",
+                "type": "string"
+              },
+              "review_checkpoint": {
+                "title": "Review Checkpoint",
+                "type": "string"
+              },
+              "evidence_basis": {
+                "title": "Evidence Basis",
+                "type": "string"
+              }
+            },
+            "required": [
+              "topic",
+              "priority",
+              "time_budget_hours",
+              "completion_criteria",
+              "review_checkpoint",
+              "evidence_basis"
+            ],
+            "title": "PreparationPlanItem",
+            "type": "object"
+          },
+          "PreparationSchedule": {
+            "description": "A user deadline or an intentionally non-calendar relative schedule.",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "target_date",
+                  "relative"
+                ],
+                "title": "Kind",
+                "type": "string"
+              },
+              "target_date": {
+                "anyOf": [
+                  {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Date"
+              },
+              "target_date_provenance": {
+                "anyOf": [
+                  {
+                    "const": "user_supplied",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Date Provenance"
+              },
+              "relative_window": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Relative Window"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "title": "PreparationSchedule",
+            "type": "object"
+          },
+          "SkillGap": {
+            "description": "One missing closed-set skill ranked across selected observed JDs.",
+            "properties": {
+              "skill": {
+                "title": "Skill",
+                "type": "string"
+              },
+              "job_count": {
+                "title": "Job Count",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "skill",
+              "job_count"
+            ],
+            "title": "SkillGap",
+            "type": "object"
+          }
+        },
+        "description": "Structured preparation plan with target evidence provenance.",
+        "properties": {
+          "target_artifact_id": {
+            "title": "Target Artifact Id",
+            "type": "string"
+          },
+          "resolved_target_artifact_id": {
+            "title": "Resolved Target Artifact Id",
+            "type": "string"
+          },
+          "selected_target_reference": {
+            "title": "Selected Target Reference",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "jd_topics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Jd Topics",
+            "type": "array"
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "schedule_assumption": {
+            "title": "Schedule Assumption",
+            "type": "string"
+          },
+          "schedule": {
+            "$ref": "#/$defs/PreparationSchedule"
+          },
+          "plan_items": {
+            "items": {
+              "$ref": "#/$defs/PreparationPlanItem"
+            },
+            "title": "Plan Items",
+            "type": "array"
+          },
+          "skill_gaps": {
+            "items": {
+              "$ref": "#/$defs/SkillGap"
+            },
+            "title": "Skill Gaps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "target_artifact_id",
+          "resolved_target_artifact_id",
+          "selected_target_reference",
+          "source_url",
+          "jd_topics",
+          "actions",
+          "schedule_assumption",
+          "schedule",
+          "plan_items"
+        ],
+        "title": "CareerPreparationPlanOutput",
         "type": "object"
       }
     }

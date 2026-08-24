@@ -53,10 +53,31 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _load_ids_from_manifest(manifest_path: Path) -> list[str]:
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     if isinstance(data, list):
-        return [str(x) for x in data]
-    if isinstance(data, dict) and "ids" in data:
-        return [str(x) for x in data["ids"]]
-    raise ValueError(f"Cannot extract ids from manifest: {manifest_path}")
+        entries = data
+    elif isinstance(data, dict) and isinstance(data.get("ids"), list):
+        entries = data["ids"]
+    else:
+        raise ValueError(f"Cannot extract ids from manifest: {manifest_path}")
+
+    if all(isinstance(entry, dict) for entry in entries):
+        identifiers = [entry.get("id") for entry in entries]
+    elif all(isinstance(entry, str) for entry in entries):
+        identifiers = entries
+    else:
+        raise ValueError(
+            f"Cannot extract ids from manifest: {manifest_path} "
+            "(mixed or invalid entry formats)"
+        )
+
+    ids: list[str] = []
+    for index, identifier in enumerate(identifiers):
+        if not isinstance(identifier, str) or not identifier.strip():
+            raise ValueError(
+                f"Cannot extract ids from manifest: {manifest_path} "
+                f"(invalid id at entry {index})"
+            )
+        ids.append(identifier)
+    return ids
 
 
 def _validate_ids(ids: list[str], question_dir: Path) -> list[str]:

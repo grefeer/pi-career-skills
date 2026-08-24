@@ -7,6 +7,7 @@ separation, validate_record fail-closed exit, and comparison.md rendering.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ import pytest
 
 from pi_career_skills.evaluation.compare import (
     compare_pi_to_source,
+    main,
     merge_results,
     render_comparison_md,
 )
@@ -234,6 +236,85 @@ def test_skip_manifest_and_summary_files(tmp_path: Path) -> None:
     records = merge_results(tmp_path)
     assert len(records) == 1
     assert records[0]["id"] == "Q001"
+
+
+def test_merge_results_discovers_worker_records_recursively_and_skips_nested_metadata(
+    tmp_path: Path,
+) -> None:
+    _write_record(tmp_path / "worker2", _make_record("Q002"))
+    _write_record(tmp_path / "worker1", _make_record("Q001"))
+    (tmp_path / "worker1" / "summary.json").write_text(
+        json.dumps({"total": 1}), encoding="utf-8"
+    )
+    (tmp_path / "worker2" / "comparison.md").write_text(
+        "not a result", encoding="utf-8"
+    )
+
+    records = merge_results(tmp_path)
+
+    assert [record["id"] for record in records] == ["Q001", "Q002"]
+
+
+def test_merge_results_rejects_duplicate_ids_across_nested_directories(
+    tmp_path: Path,
+) -> None:
+    _write_record(tmp_path / "worker1", _make_record("Q001"))
+    _write_record(tmp_path / "worker2", _make_record("Q001"))
+
+    with pytest.raises(ValueError, match=r"Duplicate record ID 'Q001'.*worker1.*worker2"):
+        merge_results(tmp_path)
+
+
+def test_compare_loads_nested_source_records_and_rejects_duplicate_source_ids(
+    tmp_path: Path,
+) -> None:
+    pi_records = [_make_record("Q001", status="succeeded")]
+    source_dir = tmp_path / "source"
+    _write_record(source_dir / "worker1", _make_record("Q001", status="failed"))
+    (source_dir / "worker1" / "launch_manifest.json").write_text(
+        json.dumps({"total": 1}), encoding="utf-8"
+    )
+
+    result = compare_pi_to_source(pi_records, source_nonchain_dir=source_dir)
+
+    assert result["per_question"][0]["source_status"] == "failed"
+
+    _write_record(source_dir / "worker2", _make_record("Q001", status="succeeded"))
+    with pytest.raises(
+        ValueError, match=r"Duplicate source record ID 'Q001'.*worker1.*worker2"
+    ):
+        compare_pi_to_source(pi_records, source_nonchain_dir=source_dir)
+
+
+def test_main_reports_duplicate_source_record_ids_to_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pi_dir = tmp_path / "pi"
+    source_dir = tmp_path / "source"
+    out_path = tmp_path / "comparison.md"
+    _write_record(pi_dir, _make_record("Q001"))
+    _write_record(source_dir / "worker1", _make_record("Q001"))
+    _write_record(source_dir / "worker2", _make_record("Q001"))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "compare",
+            "--pi-dir",
+            str(pi_dir),
+            "--source-nonchain",
+            str(source_dir),
+            "--out",
+            str(out_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+    assert "Duplicate source record ID 'Q001'" in capsys.readouterr().err
+    assert not out_path.exists()
 
 
 # ======================================================================

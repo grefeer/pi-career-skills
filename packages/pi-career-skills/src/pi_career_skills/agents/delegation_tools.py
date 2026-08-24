@@ -1,6 +1,6 @@
 """Supervisor delegation tools — ``delegate-<skill>`` (migration plan §6.7).
 
-The supervisor owns exactly three tools, one per career skill.  Each tool
+The supervisor owns exactly four tools, one per career skill.  Each tool
 hands the task goal to a ``DelegationRunner`` supplied by the run-level
 controller (Phase 7 wires budgets, evidence promotion and the skill agent
 loop there; tests supply a fake).  The model-visible result carries only a
@@ -18,8 +18,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 from pi_agent_core.types import AgentTool, AgentToolResult, ToolExecutionMode
 from pi_ai import TextContent
@@ -30,28 +29,25 @@ from ..errors import (
     CareerToolError,
 )
 from ..runtime.completion import _bounded_summary
+from .contracts import (
+    AgentTask,
+    DelegationOutcome,
+    DelegationStatus,
+    normalize_agent_task,
+)
 
+# New runners receive ``AgentTask``.  The legacy string signature remains
+# accepted by the adapter for existing evaluation fakes and callers.
+DelegationRunner = Callable[[AgentTask, dict[str, Any]], DelegationOutcome] | Callable[
+    [str, dict[str, Any]], DelegationOutcome
+]
 
-@dataclass
-class DelegationOutcome:
-    """One delegation verdict produced by the controller's runner."""
-
-    skill: str
-    status: Literal["succeeded", "error"]
-    summary: str | None = None
-    refs: list[dict[str, Any]] | None = None
-    error_code: str | None = None
-
-
-#: Runner contract: ``(task_goal, params) -> DelegationOutcome``.  The
-#: controller (Phase 7) supplies the real runner; tests supply a fake.
-DelegationRunner = Callable[[str, dict[str, Any]], DelegationOutcome]
-
-#: Model-visible ``task_goal`` description per skill (short Chinese).
+#: Model-visible task description per skill (short Chinese).
 _GOAL_DESCRIPTIONS: dict[str, str] = {
     "job-discovery": "委托 job-discovery 技能收集公开职位页面证据并提取结构化 JD",
     "job-matching": "委托 job-matching 技能对本次运行已观察职位做透明可追溯的匹配排序",
     "resume-tailoring": "委托 resume-tailoring 技能针对目标 JD 生成简历修改建议",
+    "career-planning": "委托 career-planning 技能基于目标 JD 生成求职准备计划",
 }
 
 
@@ -62,6 +58,17 @@ def _error_message(skill: str, code: str | None) -> str:
     if code == TARGET_EVIDENCE_NOT_FOUND:
         return f"缺少已观察的职位证据，无法执行 {skill}（{TARGET_EVIDENCE_NOT_FOUND}）"
     return f"委托 {skill} 失败（{code}）"
+
+
+def _status_message(outcome: DelegationOutcome) -> str:
+    """Keep status/action visible without exposing private evidence content."""
+    if outcome.status is DelegationStatus.SUCCESS:
+        return _bounded_summary(outcome.summary) or f"技能 {outcome.skill} 已完成。"
+    code = outcome.error_code or "unknown"
+    return (
+        f"技能 {outcome.skill} 返回 {outcome.status.value}，"
+        f"建议动作 {outcome.action.value}（{code}）"
+    )
 
 
 class _DelegationAgentTool:
@@ -80,24 +87,70 @@ class _DelegationAgentTool:
         self.parameters: dict[str, Any] = {
             "type": "object",
             "properties": {
-                "task_goal": {
+                "objective": {
                     "type": "string",
                     "description": _GOAL_DESCRIPTIONS[skill],
-                }
+                },
+                "task_goal": {
+                    "type": "string",
+                    "description": "兼容旧调用；新调用请使用 objective。",
+                },
+                "input_refs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "artifact_id": {"type": "string"},
+                            "source_url": {"type": "string"},
+                            "content_hash": {"type": "string"},
+                            "artifact_type": {"type": "string"},
+                        },
+                        "required": ["artifact_id"],
+                        "additionalProperties": False,
+                    },
+                },
+                "constraints": {"type": "object"},
+                "expected_output": {
+                    "oneOf": [
+                        {"type": "string"},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "artifact_type": {"type": "string"},
+                                "requires_deliverable": {"type": "boolean"},
+                            },
+                            "required": ["artifact_type"],
+                            "additionalProperties": False,
+                        },
+                    ]
+                },
             },
-            "required": ["task_goal"],
+            "anyOf": [{"required": ["objective"]}, {"required": ["task_goal"]}],
             "additionalProperties": False,
         }
         self.label = skill
         self.execution_mode: ToolExecutionMode | None = "sequential"
 
-    def _error_result(self, code: str | None) -> AgentToolResult:
+    def _error_result(
+        self,
+        outcome: DelegationOutcome,
+        *,
+        legacy: bool,
+    ) -> AgentToolResult:
+        status = "error" if legacy else outcome.status.value
         return AgentToolResult(
-            content=[TextContent(text=_error_message(self._skill, code))],
+            content=[
+                TextContent(
+                    text=_error_message(self._skill, outcome.error_code)
+                    if legacy
+                    else _status_message(outcome)
+                )
+            ],
             details={
                 "skill": self._skill,
-                "status": "error",
-                "error_code": code,
+                "status": status,
+                **({} if legacy else {"action": outcome.action.value}),
+                "error_code": outcome.error_code,
             },
             terminate=False,
         )
@@ -115,25 +168,33 @@ class _DelegationAgentTool:
         message rule as a returned ``error`` outcome.
         """
         del tool_call_id, cancel_event, on_update
-        task_goal = params.get("task_goal", "")
+        task = normalize_agent_task(params)
+        legacy = "objective" not in params
         try:
-            outcome = await asyncio.to_thread(self._runner, task_goal, params)
+            runner_input: AgentTask | str = task.objective if legacy else task
+            outcome = await asyncio.to_thread(self._runner, runner_input, params)
         except CareerToolError as exc:
-            return self._error_result(exc.code)
-        if outcome.status == "succeeded":
-            bounded = _bounded_summary(outcome.summary)
-            if bounded is None:
-                bounded = f"技能 {self._skill} 已完成。"
+            outcome = DelegationOutcome(
+                skill=self._skill,
+                status=DelegationStatus.FAILED,
+                error_code=exc.code,
+            )
+            return self._error_result(outcome, legacy=legacy)
+        if outcome.status is DelegationStatus.SUCCESS:
             return AgentToolResult(
-                content=[TextContent(text=bounded)],
+                content=[TextContent(text=_status_message(outcome))],
                 details={
                     "skill": self._skill,
-                    "status": "succeeded",
-                    "refs": outcome.refs or [],
+                    "status": "succeeded" if legacy else outcome.status.value,
+                    **({} if legacy else {"action": outcome.action.value}),
+                    "refs": outcome.safe_refs(),
                 },
-                terminate=True,
+                # Preserve legacy terminal behavior for callers that still
+                # use ``task_goal``; structured AgentTask calls stay in the
+                # controller loop and are explicitly continued there.
+                terminate=legacy,
             )
-        return self._error_result(outcome.error_code)
+        return self._error_result(outcome, legacy=legacy)
 
 
 def make_delegation_tool(skill: str, runner: DelegationRunner) -> AgentTool:
@@ -142,7 +203,9 @@ def make_delegation_tool(skill: str, runner: DelegationRunner) -> AgentTool:
 
 
 __all__ = [
+    "AgentTask",
     "DelegationOutcome",
     "DelegationRunner",
+    "DelegationStatus",
     "make_delegation_tool",
 ]

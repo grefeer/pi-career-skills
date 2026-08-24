@@ -30,6 +30,7 @@ _JOB_BEARING_ARTIFACT_TYPES = frozenset(
         "structured_job_details",
         "job_matching_report",
         "resume_tailoring_brief",
+        "career_preparation_plan",
     }
 )
 
@@ -196,6 +197,19 @@ def tailoring_completed(store: Any) -> bool:
     return False
 
 
+def career_planning_completed(store: Any) -> bool:
+    """True when a target-linked preparation plan has durable action items."""
+    for artifact in store.job_bearing_artifacts():
+        if artifact.artifact_type != "career_preparation_plan":
+            continue
+        content = artifact.content or {}
+        target_id = content.get("target_artifact_id")
+        action_items = content.get("action_items") or content.get("plan_items") or content.get("actions")
+        if target_id and isinstance(action_items, list) and action_items:
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Run-level completion policy
 # ---------------------------------------------------------------------------
@@ -222,6 +236,7 @@ class RunCompletionPolicy:
         "job-discovery": discovery_completed,
         "job-matching": matching_completed,
         "resume-tailoring": tailoring_completed,
+        "career-planning": career_planning_completed,
     }
 
     def evaluate(
@@ -417,6 +432,7 @@ __all__ = [
     "discovery_completed",
     "matching_completed",
     "tailoring_completed",
+    "career_planning_completed",
     "terminal_guard",
     "matching_fallback",
 ]

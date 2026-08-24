@@ -75,6 +75,7 @@ def _find_raw_target(raw_evidence: object, target_id: str) -> dict[str, Any] | N
     for item in raw_evidence:
         if isinstance(item, dict) and (
             item.get("artifact_id") == target_id
+            or _has_alias(item, "artifact_aliases", target_id)
             or _normalized_url(item.get("source_url")) == _normalized_url(target_id)
             or f"observed:{item.get('content_hash')}" == target_id
         ):
@@ -96,7 +97,9 @@ def _find_structured_candidate(
         if (
             target_id.strip() == candidate.get("candidate_id")
             or target_id == candidate.get("artifact_id")
+            or _has_alias(candidate, "artifact_aliases", target_id)
             or target_id == candidate.get("source_artifact_id")
+            or _has_alias(candidate, "source_artifact_aliases", target_id)
             or _normalized_url(target_id) == _normalized_url(candidate.get("source_url"))
             or (
                 isinstance(target_source_url, str)
@@ -110,6 +113,12 @@ def _find_structured_candidate(
         ):
             return candidate
     return None
+
+
+def _has_alias(item: dict[str, Any], key: str, target_id: str) -> bool:
+    """True when a bounded projection retains *target_id* under *key*."""
+    aliases = item.get(key)
+    return isinstance(aliases, list) and target_id in aliases
 
 
 def _candidate_text(candidate: dict[str, Any]) -> str | None:

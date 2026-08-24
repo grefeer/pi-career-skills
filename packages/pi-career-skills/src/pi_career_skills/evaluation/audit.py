@@ -8,6 +8,8 @@ Implements the §12.1 audit rules:
   resolve to artifacts in the record (or inherited evidence).
 * **tailoring** — a ``resume_tailoring_brief`` artifact with resolvable
   target and confirmed fact references for every action.
+* **planning** — a ``career_preparation_plan`` anchored to a canonical
+  persisted JD with factually supported topics and reviewable plan items.
 * **chain** — per-link audit; any succeeded link that is failed or
   inconclusive makes the top-level audit not ``passed``.
 
@@ -18,6 +20,7 @@ inventions per migration plan §12.1.
 
 from __future__ import annotations
 
+from datetime import date
 import re
 from typing import Any
 
@@ -36,6 +39,53 @@ _REGRESSION_ERROR_CODES: frozenset[str] = frozenset({
 _FORBIDDEN_QUALITIES: frozenset[str] = frozenset({
     "list_only", "search_empty", "blocked", "empty",
 })
+
+# Only these artifacts can serve as canonical JD targets for tailoring or
+# planning. Derived deliverables may carry a source URL, but must never become
+# self-referential target evidence for a later skill.
+_TARGET_EVIDENCE_ARTIFACT_TYPES: frozenset[str] = frozenset({
+    "public_job_page", "structured_job_details",
+})
+
+_NAVIGATION_ONLY_TITLES: frozenset[str] = frozenset({
+    "浏览职位",
+    "查看全部",
+    "申请职位",
+    "职位",
+    "岗位",
+    "职位列表",
+    "岗位列表",
+    "首页",
+    "招聘",
+    "投递",
+    "登录",
+    "注册",
+})
+
+# Planning may prepare a user for an interview, but it must never execute an
+# application, payment, purchase, transfer, deletion, resignation, or contract
+# action.  Keep this narrow: generic words such as “application” are allowed
+# in a JD topic; only action phrases are denied.
+_FORBIDDEN_PLANNING_ACTION_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bapply(?:\s+for)?\b", re.IGNORECASE),
+    re.compile(r"\bsubmit\s+(?:an?\s+)?(?:application|resume|cv)\b", re.IGNORECASE),
+    re.compile(r"\b(?:pay|payment|transfer|purchase|buy|delete|destroy|resign|quit)\b", re.IGNORECASE),
+)
+_FORBIDDEN_PLANNING_ACTION_PHRASES: tuple[str, ...] = (
+    "投递简历",
+    "提交申请",
+    "支付",
+    "付款",
+    "转账",
+    "购买",
+    "下单",
+    "删除",
+    "清空",
+    "辞职",
+    "离职",
+    "签署合同",
+    "签约",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +138,224 @@ def _build_ref_index(
                 str(ref.get("content_hash", "") or ""),
             ))
     return index
+
+
+def _declared_skill(record: dict[str, Any]) -> str | None:
+    """Return the most specific recognized skill declared by record metadata."""
+    meta = record.get("meta")
+    skills = meta.get("skills") if isinstance(meta, dict) else None
+    if not isinstance(skills, list):
+        return None
+    declared = {skill for skill in skills if isinstance(skill, str)}
+    for source_name, audit_name in (
+        ("career-planning", "planning"),
+        ("resume-tailoring", "tailoring"),
+        ("job-matching", "matching"),
+        ("job-discovery", "discovery"),
+    ):
+        if source_name in declared:
+            return audit_name
+    return None
+
+
+def _target_evidence_by_id(
+    artifacts: list[dict[str, Any]],
+    inherited_refs: list[dict] | None,
+) -> dict[str, dict[str, Any]]:
+    """Index persisted candidate targets, retaining enough content to audit them.
+
+    ``inherited_refs`` must contain complete serialized job artifacts, not
+    shallow ``artifact_id/source_url/content_hash`` references: planning needs
+    the inherited ``content_json`` to prove its topics came from a JD.
+    """
+    evidence: dict[str, dict[str, Any]] = {}
+    for artifact in [*artifacts, *(inherited_refs or [])]:
+        if not isinstance(artifact, dict):
+            continue
+        if artifact.get("artifact_type") not in _TARGET_EVIDENCE_ARTIFACT_TYPES:
+            continue
+        artifact_id = artifact.get("artifact_id")
+        if isinstance(artifact_id, str) and artifact_id.strip():
+            evidence.setdefault(artifact_id, artifact)
+    return evidence
+
+
+def _nonempty_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _candidate_matches_reference(candidate: dict[str, Any], reference: str) -> bool:
+    """Match the user/model selector to a structured-candidate identity."""
+    return any(
+        candidate.get(key) == reference
+        for key in (
+            "candidate_id",
+            "artifact_id",
+            "source_artifact_id",
+            "source_url",
+            "page_source_url",
+        )
+    )
+
+
+def _candidate_text(candidate: dict[str, Any]) -> str:
+    """Return the factual text fields available for one extracted candidate."""
+    fields = (
+        "full_text",
+        "visible_text",
+        "page_text_prefix",
+        "title",
+        "responsibilities",
+        "requirements",
+    )
+    return "\n".join(
+        value.strip()
+        for field in fields
+        if isinstance((value := candidate.get(field)), str) and value.strip()
+    )
+
+
+def _structured_candidates(artifact: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten candidates from one persisted structured-detail artifact."""
+    content = artifact.get("content_json")
+    if not isinstance(content, dict):
+        return []
+    candidates: list[dict[str, Any]] = []
+    for key in ("candidates", "details"):
+        raw = content.get(key)
+        if not isinstance(raw, list):
+            continue
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            nested = item.get("candidates")
+            if isinstance(nested, list):
+                candidates.extend(candidate for candidate in nested if isinstance(candidate, dict))
+            else:
+                candidates.append(item)
+    return candidates
+
+
+def _has_valid_target_fields(artifact: dict[str, Any]) -> bool:
+    """Check the persisted identity fields required for a canonical JD target."""
+    return (
+        _nonempty_string(artifact.get("artifact_id"))
+        and _nonempty_string(artifact.get("source_url"))
+        and isinstance(artifact.get("content_hash"), str)
+        and _SHA256_RE.fullmatch(artifact["content_hash"]) is not None
+    )
+
+
+def _is_valid_structured_candidate(
+    candidate: dict[str, Any], *, source_url: str
+) -> bool:
+    """Require a real role title, source provenance, and substantive JD body."""
+    title = candidate.get("title")
+    candidate_url = candidate.get("page_source_url") or candidate.get("source_url")
+    if not (
+        _nonempty_string(title)
+        and title.strip() not in _NAVIGATION_ONLY_TITLES
+        and candidate_url == source_url
+    ):
+        return False
+    return len(_candidate_text(candidate)) >= 20
+
+
+def _is_valid_target_evidence(artifact: dict[str, Any]) -> bool:
+    """Return whether an artifact is a complete public page or structured JD."""
+    if not _has_valid_target_fields(artifact):
+        return False
+    content = artifact.get("content_json")
+    if not isinstance(content, dict):
+        return False
+    if artifact.get("artifact_type") == "public_job_page":
+        return (
+            artifact.get("quality") == "jd_complete"
+            and _nonempty_string(content.get("visible_text"))
+        )
+    if artifact.get("artifact_type") == "structured_job_details":
+        source_url = artifact.get("source_url")
+        return any(
+            _is_valid_structured_candidate(candidate, source_url=source_url)
+            for candidate in _structured_candidates(artifact)
+        )
+    return False
+
+
+def _canonical_selector_aliases(artifact: dict[str, Any]) -> set[str]:
+    """Return safe aliases for one persisted canonical target artifact."""
+    artifact_id = artifact.get("artifact_id")
+    source_url = artifact.get("source_url")
+    content_hash = artifact.get("content_hash")
+    assert isinstance(artifact_id, str)
+    assert isinstance(source_url, str)
+    assert isinstance(content_hash, str)
+    return {artifact_id, source_url, f"observed:{content_hash}"}
+
+
+def _resolve_target_jd_text(
+    artifact: dict[str, Any], selected_reference: str
+) -> tuple[str | None, str | None]:
+    """Resolve a canonical/real selector to JD text, never silently fallback.
+
+    Returns ``(text, None)`` for a valid selector and
+    ``(None, "planning_selected_target_reference_unresolved")`` otherwise.
+    """
+    aliases = _canonical_selector_aliases(artifact)
+    artifact_type = artifact.get("artifact_type")
+    content = artifact.get("content_json")
+    assert isinstance(content, dict)
+
+    if artifact_type == "public_job_page":
+        if selected_reference not in aliases:
+            return None, "planning_selected_target_reference_unresolved"
+        visible_text = content.get("visible_text")
+        assert isinstance(visible_text, str)
+        return visible_text, None
+
+    candidates = [
+        candidate
+        for candidate in _structured_candidates(artifact)
+        if _is_valid_structured_candidate(candidate, source_url=artifact["source_url"])
+    ]
+    if selected_reference in aliases:
+        return "\n".join(_candidate_text(candidate) for candidate in candidates), None
+    selected = [
+        candidate
+        for candidate in candidates
+        if _candidate_matches_reference(candidate, selected_reference)
+    ]
+    if len(selected) != 1:
+        return None, "planning_selected_target_reference_unresolved"
+    return _candidate_text(selected[0]), None
+
+
+def _is_forbidden_planning_action(action: str) -> bool:
+    """Recognize only documented irreversible/action-taking plan verbs."""
+    return any(pattern.search(action) for pattern in _FORBIDDEN_PLANNING_ACTION_PATTERNS) or any(
+        phrase in action for phrase in _FORBIDDEN_PLANNING_ACTION_PHRASES
+    )
+
+
+def _is_iso_date(value: object) -> bool:
+    """Accept only canonical JSON ISO-8601 calendar dates."""
+    if not isinstance(value, str):
+        return False
+    try:
+        return date.fromisoformat(value).isoformat() == value
+    except ValueError:
+        return False
+
+
+def _topic_supported_by_jd(topic: str, jd_text: str) -> bool:
+    """Match ASCII skills as identifiers while preserving CJK phrase support."""
+    if re.fullmatch(r"[A-Za-z0-9_]+", topic):
+        return re.search(
+            rf"(?<![A-Za-z0-9_]){re.escape(topic)}(?![A-Za-z0-9_])",
+            jd_text,
+            flags=re.IGNORECASE,
+        ) is not None
+    return topic.casefold() in jd_text.casefold()
 
 
 # ---------------------------------------------------------------------------
@@ -287,21 +555,293 @@ def _audit_tailoring(
     return {"status": "inconclusive", "reason": "no_usable_tailoring_brief"}
 
 
+def _audit_planning(
+    artifacts: list[dict[str, Any]],
+    inherited_refs: list[dict] | None,
+) -> dict[str, Any]:
+    """Audit evidence-grounded ``career_preparation_plan`` artifacts.
+
+    A plan is usable only when it points to a canonical stored JD, preserves
+    the JD source URL, and derives every stated topic and action item from
+    that JD.  This is deliberately stricter than discovery: a copied
+    inherited page cannot turn a missing plan into a successful planning run.
+    """
+    plan_artifacts = [
+        artifact
+        for artifact in artifacts
+        if artifact.get("artifact_type") == "career_preparation_plan"
+    ]
+    if not plan_artifacts:
+        return {"status": "inconclusive", "reason": "no_career_preparation_plan"}
+
+    target_evidence = _target_evidence_by_id(artifacts, inherited_refs)
+    first_failure: dict[str, Any] | None = None
+
+    for plan in plan_artifacts:
+        content = plan.get("content_json")
+        if not isinstance(content, dict):
+            failure = {"status": "failed", "reason": "planning_content_malformed"}
+        else:
+            target_id = content.get("target_artifact_id")
+            resolved_target_id = content.get("resolved_target_artifact_id")
+            if not isinstance(target_id, str) or not target_id.strip():
+                failure = {"status": "failed", "reason": "planning_target_missing"}
+            elif (
+                not isinstance(resolved_target_id, str)
+                or not resolved_target_id.strip()
+                or resolved_target_id != target_id
+            ):
+                failure = {
+                    "status": "failed",
+                    "reason": "planning_target_not_canonical",
+                }
+            else:
+                target = target_evidence.get(target_id)
+                if target is None:
+                    failure = {
+                        "status": "failed",
+                        "reason": "planning_target_unresolved",
+                        "target_artifact_id": target_id,
+                    }
+                elif not _is_valid_target_evidence(target):
+                    failure = {
+                        "status": "failed",
+                        "reason": "planning_target_invalid",
+                        "target_artifact_id": target_id,
+                    }
+                else:
+                    target_url = target["source_url"]
+                    plan_url = content.get("source_url")
+                    artifact_url = plan.get("source_url")
+                    if not (
+                        plan_url == target_url
+                        and artifact_url == target_url
+                    ):
+                        failure = {
+                            "status": "failed",
+                            "reason": "planning_source_url_mismatch",
+                        }
+                    else:
+                        selected_reference = content.get("selected_target_reference")
+                        if not isinstance(selected_reference, str) or not selected_reference.strip():
+                            failure = {
+                                "status": "failed",
+                                "reason": "planning_selected_target_reference_missing",
+                            }
+                        else:
+                            jd_text, selector_error = _resolve_target_jd_text(
+                                target, selected_reference
+                            )
+                            if selector_error is not None:
+                                failure = {
+                                    "status": "failed",
+                                    "reason": selector_error,
+                                }
+                            else:
+                                topics = content.get("jd_topics")
+                                if not (
+                                    isinstance(topics, list)
+                                    and topics
+                                    and all(
+                                        isinstance(topic, str) and topic.strip()
+                                        for topic in topics
+                                    )
+                                ):
+                                    failure = {
+                                        "status": "failed",
+                                        "reason": "planning_topics_missing",
+                                    }
+                                else:
+                                    typed_topics = [str(topic) for topic in topics]
+                                    unsupported_topics = [
+                                        topic
+                                        for topic in typed_topics
+                                        if not _topic_supported_by_jd(topic, jd_text or "")
+                                    ]
+                                    if unsupported_topics:
+                                        failure = {
+                                            "status": "failed",
+                                            "reason": "planning_topics_not_supported",
+                                            "unsupported_topics": unsupported_topics,
+                                        }
+                                    else:
+                                        failure = _audit_planning_actions_and_items(
+                                            content,
+                                            jd_text or "",
+                                            typed_topics,
+                                        )
+
+        if failure is None:
+            # The helper returns None only for a fully valid plan.
+            return {
+                "status": "passed",
+                "target_artifact_id": content["target_artifact_id"],
+                "topics_count": len(content["jd_topics"]),
+                "actions_count": len(content["actions"]),
+                "plan_items_count": len(content["plan_items"]),
+            }
+        if first_failure is None:
+            first_failure = failure
+
+    return first_failure or {
+        "status": "inconclusive",
+        "reason": "no_usable_career_preparation_plan",
+    }
+
+
+def _audit_planning_actions_and_items(
+    content: dict[str, Any],
+    jd_text: str,
+    topics: list[str],
+) -> dict[str, Any] | None:
+    """Return a failure payload unless actions and plan items are reviewable."""
+    actions = content.get("actions")
+    if not (
+        isinstance(actions, list)
+        and actions
+        and all(_nonempty_string(action) for action in actions)
+    ):
+        return {"status": "failed", "reason": "planning_actions_missing"}
+    for action in actions:
+        if _is_forbidden_planning_action(action):
+            return {"status": "failed", "reason": "planning_action_forbidden"}
+        if not any(_topic_supported_by_jd(topic, action) for topic in topics):
+            return {
+                "status": "failed",
+                "reason": "planning_actions_not_topic_grounded",
+            }
+
+    items = content.get("plan_items")
+    if not isinstance(items, list) or not items:
+        return {"status": "failed", "reason": "planning_plan_items_missing"}
+
+    if not _nonempty_string(content.get("schedule_assumption")):
+        return {
+            "status": "failed",
+            "reason": "planning_schedule_assumption_missing",
+        }
+
+    schedule = content.get("schedule")
+    if not isinstance(schedule, dict) or schedule.get("kind") not in {
+        "relative",
+        "target_date",
+    }:
+        return {"status": "failed", "reason": "planning_schedule_malformed"}
+
+    schedule_kind = schedule["kind"]
+    target_date = schedule.get("target_date")
+    if schedule_kind == "relative":
+        if not _nonempty_string(schedule.get("relative_window")):
+            return {
+                "status": "failed",
+                "reason": "planning_relative_window_missing",
+            }
+        if target_date is not None:
+            return {
+                "status": "failed",
+                "reason": "planning_relative_schedule_has_due_date",
+            }
+        if (
+            "target_date_provenance" not in schedule
+            or schedule.get("target_date_provenance") is not None
+        ):
+            return {
+                "status": "failed",
+                "reason": "planning_relative_target_date_provenance_invalid",
+            }
+    else:
+        if not _is_iso_date(target_date):
+            return {
+                "status": "failed",
+                "reason": "planning_schedule_target_date_invalid",
+            }
+        if schedule.get("target_date_provenance") != "user_supplied":
+            return {
+                "status": "failed",
+                "reason": "planning_schedule_target_date_provenance_invalid",
+            }
+
+    topic_set = {topic.casefold() for topic in topics}
+    for item in items:
+        if not isinstance(item, dict):
+            return {"status": "failed", "reason": "planning_plan_item_malformed"}
+        item_topic = item.get("topic")
+        if not _nonempty_string(item_topic):
+            return {"status": "failed", "reason": "planning_item_topic_missing"}
+        if item_topic.casefold() not in topic_set:
+            return {"status": "failed", "reason": "planning_item_topic_not_declared"}
+        if not _topic_supported_by_jd(item_topic, jd_text):
+            return {"status": "failed", "reason": "planning_item_topic_not_supported"}
+        hours = item.get("time_budget_hours")
+        if isinstance(hours, bool) or not isinstance(hours, int) or hours <= 0:
+            return {"status": "failed", "reason": "planning_item_hours_invalid"}
+        if not _nonempty_string(item.get("completion_criteria")):
+            return {
+                "status": "failed",
+                "reason": "planning_item_completion_criteria_missing",
+            }
+        if not _nonempty_string(item.get("review_checkpoint")):
+            return {
+                "status": "failed",
+                "reason": "planning_item_review_checkpoint_missing",
+            }
+        if not _nonempty_string(item.get("evidence_basis")):
+            return {
+                "status": "failed",
+                "reason": "planning_item_evidence_basis_missing",
+            }
+        if not _topic_supported_by_jd(item_topic, item["evidence_basis"]):
+            return {
+                "status": "failed",
+                "reason": "planning_item_evidence_basis_not_topic_grounded",
+            }
+        if schedule_kind == "relative" and item.get("due_date") is not None:
+            return {
+                "status": "failed",
+                "reason": "planning_relative_schedule_has_due_date",
+            }
+        if schedule_kind == "relative" and item.get("relative_order") not in {
+            "first",
+            "then",
+        }:
+            return {
+                "status": "failed",
+                "reason": "planning_relative_order_missing",
+            }
+        if schedule_kind == "target_date" and item.get("due_date") != target_date:
+            return {
+                "status": "failed",
+                "reason": "planning_target_date_due_date_mismatch",
+            }
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Top-level audit
 # ---------------------------------------------------------------------------
 
 
-def _detect_skill(artifacts: list[dict[str, Any]]) -> str | None:
-    """Heuristic: determine which skill the record represents by artifact types."""
+def _detect_skill(record: dict[str, Any], artifacts: list[dict[str, Any]]) -> str | None:
+    """Determine the audited skill from deliverables, then declared intent.
+
+    Planning must win before discovery because a planning link often carries
+    inherited JD artifacts.  When a failed planning link has no plan artifact,
+    its declared ``meta.skills`` still selects the planning audit rather than
+    allowing an inherited page to hide the omission.
+    """
     types = {a.get("artifact_type") for a in artifacts}
+    if "career_preparation_plan" in types:
+        return "planning"
+    declared = _declared_skill(record)
+    if declared == "planning":
+        return "planning"
     if "resume_tailoring_brief" in types:
         return "tailoring"
     if "job_matching_report" in types:
         return "matching"
     if "public_job_page" in types or "job_search_results" in types:
         return "discovery"
-    return None
+    return declared
 
 
 def audit_record(
@@ -334,12 +874,13 @@ def audit_record(
 
     artifacts = _artifact_list(record)
     ref_index = _build_ref_index(artifacts, inherited_refs)
-    skill = _detect_skill(artifacts)
+    skill = _detect_skill(record, artifacts)
 
     checks: dict[str, Any] = {}
     checks["discovery"] = _audit_discovery(artifacts)
     checks["matching"] = _audit_matching(artifacts, ref_index)
     checks["tailoring"] = _audit_tailoring(artifacts, ref_index, confirmed_facts)
+    checks["planning"] = _audit_planning(artifacts, inherited_refs)
 
     # Overall status: use the detected skill's result
     if skill is None:
@@ -406,13 +947,12 @@ def audit_chain(
         )
         per_link.append(link_audit)
 
-        # Accumulate inherited refs from link artifacts for next link
+        # Carry only persisted JD evidence.  A matching/tailoring/planning
+        # deliverable can contain a source URL but must never become a future
+        # canonical target just because it was produced earlier in the chain.
         for art in _artifact_list(link):
-            inherited.append({
-                "artifact_id": art.get("artifact_id", ""),
-                "source_url": art.get("source_url", ""),
-                "content_hash": art.get("content_hash", ""),
-            })
+            if art.get("artifact_type") in _TARGET_EVIDENCE_ARTIFACT_TYPES:
+                inherited.append(art)
 
         link_status = link_audit["status"]
         if link_status == "passed":

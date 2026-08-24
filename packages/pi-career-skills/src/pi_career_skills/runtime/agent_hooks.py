@@ -8,6 +8,7 @@ the controller populates before each agent invocation.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -43,6 +44,9 @@ class ControllerHooks:
     before_tool_call: Any
     after_tool_call: Any
     agent_ref_box: list[Any]  # mutable box: [agent | None]
+    # Agents execute business tools sequentially, so one active callback is
+    # sufficient; this is deliberately not a cross-delegation concurrency API.
+    context_refresh_box: list[Callable[[], None] | None]
 
 
 def build_controller_hooks(
@@ -53,6 +57,7 @@ def build_controller_hooks(
     event_log: EventLogger,
     halt_box: list[tuple[str, str] | None],
     skill_name: str | None = None,
+    context_refresh_box: list[Callable[[], None] | None] | None = None,
 ) -> ControllerHooks:
     """Build the set of hooks shared by supervisor and skill agents.
 
@@ -69,6 +74,7 @@ def build_controller_hooks(
     """
     soft_stall_steered: list[bool] = [False]
     agent_ref_box: list[Any] = [None]
+    refresh_box = context_refresh_box if context_refresh_box is not None else [None]
     kind_label = skill_name or "supervisor"
 
     def _record_halt(code: str, message: str) -> None:
@@ -154,6 +160,8 @@ def build_controller_hooks(
         # Case 1: skill-agent business tool (details is ToolObservation).
         if _is_tool_observation(details):
             promoted = store.add_observation(details)
+            if promoted and refresh_box[0] is not None:
+                refresh_box[0]()
             guard.set_artifact_count(len(store.job_bearing_artifacts()))
             succeeded = details.status == "succeeded"
             produced = bool(promoted)
@@ -212,7 +220,7 @@ def build_controller_hooks(
         ):
             skill = details.get("skill", "")
             status = details.get("status", "")
-            succeeded = status == "succeeded"
+            succeeded = status in {"succeeded", "success"}
             guard.note_call(
                 f"delegate-{skill}",
                 params_hash,
@@ -236,6 +244,7 @@ def build_controller_hooks(
         before_tool_call=before_tool_call,
         after_tool_call=after_tool_call,
         agent_ref_box=agent_ref_box,
+        context_refresh_box=refresh_box,
     )
 
 

@@ -1,7 +1,8 @@
 """Registered career-skill tool definitions and the trusted-kernel registry.
 
 Port of ``backend/app/services/career_skills/registry.py`` from the source
-project.  The 12 tool descriptions are copied **verbatim** — they are
+project.  The 13 tool descriptions are copied **verbatim** or derived from
+the approved archived skill contract — they are
 model-visible contract text (the subagent prompts name the same tools) and
 must not drift from the source.
 
@@ -9,7 +10,7 @@ The registry is the single source of truth for:
 
 * tool identity (``name`` / ``skill_name`` / ``is_deliverable``),
 * the persisted artifact type per deliverable tool (``TOOL_ARTIFACT_TYPE``),
-* the per-skill catalog (``TOOL_CATALOG_BY_SKILL`` — 10 / 1 / 1),
+* the per-skill catalog (``TOOL_CATALOG_BY_SKILL`` — 10 / 1 / 1 / 1),
 * the deterministic invoke entry (``CareerToolRegistry.invoke``) used by
   the trusted kernel (matching fallback, controller orchestration).
 
@@ -26,6 +27,11 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from .business.career_planning import (
+    BuildPreparationPlanInput,
+    CareerPreparationPlanOutput,
+    build_preparation_plan,
+)
 from .business.job_discovery.handlers import (
     deduplicate_observed_jobs,
     extract_observed_job_details,
@@ -81,6 +87,7 @@ TOOL_ARTIFACT_TYPE: dict[str, str] = {
     "extract-observed-job-details-batch": "structured_job_details",
     "match-observed-jobs": "job_matching_report",
     "build-resume-tailoring-brief": "resume_tailoring_brief",
+    "build-preparation-plan": "career_preparation_plan",
 }
 
 
@@ -181,10 +188,11 @@ class CareerToolRegistry(Mapping[str, ToolDefinition]):
 
 
 def build_career_tool_registry() -> CareerToolRegistry:
-    """Build the reviewed catalog: 12 tools across three skills.
+    """Build the reviewed catalog: 13 tools across four skills.
 
-    Descriptions are verbatim from ``backend/app/services/career_skills/
-    registry.py``; input/output models point at the ported pydantic models.
+    Existing descriptions are verbatim from ``backend/app/services/
+    career_skills/registry.py``; career-planning uses the approved archived
+    Skill contract. Input/output models point at the ported pydantic models.
     """
     registry = CareerToolRegistry()
     registry.register(
@@ -367,11 +375,26 @@ def build_career_tool_registry() -> CareerToolRegistry:
             description="基于已确认简历事实与一个 JD 生成不可虚构、可审阅的简历修改建议。",
         )
     )
+    registry.register(
+        ToolDefinition(
+            name="build-preparation-plan",
+            skill_name="career-planning",
+            input_model=BuildPreparationPlanInput,
+            output_model=CareerPreparationPlanOutput,
+            handler=build_preparation_plan,
+            is_deliverable=True,
+            artifact_type=TOOL_ARTIFACT_TYPE["build-preparation-plan"],
+            description=(
+                "基于已观察目标 JD 生成可审阅、可追溯的求职准备计划；"
+                "不得捏造截止日期或执行投递。"
+            ),
+        )
+    )
     return registry
 
 
 #: Per-skill catalog — Phase 5 uses this to scope each subagent's tool grant.
-#: job-discovery 10 / job-matching 1 / resume-tailoring 1.
+#: job-discovery 10 / job-matching 1 / resume-tailoring 1 / career-planning 1.
 TOOL_CATALOG_BY_SKILL: dict[str, list[str]] = (
     build_career_tool_registry().catalog_by_skill()
 )

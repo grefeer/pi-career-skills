@@ -1,7 +1,8 @@
 """Evaluation chain tests — hermetic via faux provider + stub registry.
 
-Covers: 2-link chain with inheritance, broken chain stop, projection bounds
-(24,000 / 32,000 / 12 / 200-char), and template string presence.
+Covers: 2-link chain with inheritance, a raw C003-style 3-link planning
+chain, broken chain stop, projection bounds (24,000 / 32,000 / 12 / 200-char),
+and template string presence.
 """
 
 from __future__ import annotations
@@ -15,6 +16,10 @@ import pytest
 
 from pi_ai import ToolCall
 from pi_ai.providers.faux import FAUX_MODEL, FauxScript, clear_scripts, push_script
+from pi_career_skills.business.career_planning import (
+    BuildPreparationPlanInput,
+    build_preparation_plan,
+)
 from pi_career_skills.business.job_discovery.models import (
     ExtractedJobDetails,
     ExtractObservedJobDetailsBatchInput,
@@ -29,14 +34,16 @@ from pi_career_skills.business.job_discovery.models import (
 from pi_career_skills.business.job_matching.job_matching import (
     MatchObservedJobsInput,
     MatchObservedJobsOutput,
-    ObservedJobMatch,
+    match_observed_jobs,
 )
+from pi_career_skills.evaluation.audit import audit_chain
 from pi_career_skills.evaluation.chain import (
     _MAX_CHAIN_SUMMARY_CHARS,
     _MAX_INHERITED_EVIDENCE_BYTES,
     _MAX_STRUCTURED_CANDIDATE_BYTES,
     _MAX_STRUCTURED_CANDIDATES,
     _bounded_inherited_evidence,
+    _candidate_urls_from_artifacts,
     _cap_utf8_bytes,
     _inherited_goal_supplement,
     _structured_candidates_from_artifacts,
@@ -44,6 +51,7 @@ from pi_career_skills.evaluation.chain import (
 )
 from pi_career_skills.evaluation.schema import validate_record
 from pi_career_skills.registry import ToolDefinition
+from pi_career_skills.context import ToolContext
 from pi_career_skills.runtime.controller import CareerRunController
 
 # ======================================================================
@@ -112,21 +120,7 @@ def build_stub_registry() -> tuple[Any, dict[str, int]]:
         return ExtractObservedJobDetailsBatchOutput(details=[detail])
 
     def _match_jobs(ctx: Any, params: Any) -> Any:
-        del ctx, params
-        m = ObservedJobMatch(
-            artifact_id="art-match-1",
-            source_url="https://example.com/job/1",
-            source_artifact_id="art-struct-1",
-            title="Java 后端开发工程师",
-            score=85,
-            matched_keywords=["Java", "Spring Boot"],
-            evidence_excerpt="要求Java和Spring Boot经验",
-        )
-        return MatchObservedJobsOutput(
-            matches=[m],
-            evaluated_candidate_count=1,
-            evaluated_source_urls=["https://example.com/job/1"],
-        )
+        return match_observed_jobs(ctx, params)
 
     def _noop_tool(ctx: Any, params: Any) -> Any:
         del ctx, params
@@ -298,6 +292,28 @@ def _matching_link(skills: list[str] | None = None) -> dict[str, Any]:
     }
 
 
+def _raw_chain_link(
+    link_id: str,
+    artifacts: list[dict[str, Any]],
+    *,
+    skills: list[str],
+) -> dict[str, Any]:
+    """Build a schema-valid link without registering a runtime planning tool."""
+    return {
+        "id": link_id,
+        "question": f"question for {link_id}",
+        "meta": {"skills": skills},
+        "config": {"prompt_hashes": {}, "feature_flags": {}, "seeded_urls": []},
+        "result": {"status": "succeeded", "error_code": None, "summary": "done"},
+        "attempts": [],
+        "artifacts": artifacts,
+        "events": [],
+        "budget": {"limits": {}, "consumed": {}},
+        "audit": {"status": "passed"},
+        "wall_seconds": 0.0,
+    }
+
+
 # ======================================================================
 # 1. Two-link chain: link1 (discovery) succeeds, link2 (matching) inherits
 # ======================================================================
@@ -380,6 +396,7 @@ async def test_two_link_chain_inherits(
     # chain-context note can be verified end-to-end (regression test for the
     # _chain_context_note wiring — see Wave 5 review medium-1 finding).
     captured_tasks: list[str] = []
+    captured_requests: list[Any] = []
 
     def _capturing_factory() -> CareerRunController:
         reg, _ = stub_registry
@@ -392,6 +409,7 @@ async def test_two_link_chain_inherits(
 
         async def _run(request: Any) -> Any:
             captured_tasks.append(request.task)
+            captured_requests.append(request)
             return await orig_run(request)
 
         base.run = _run  # type: ignore[method-assign]
@@ -435,13 +453,238 @@ async def test_two_link_chain_inherits(
     assert "上一环节（C001-L1）" in captured_tasks[1]
     assert "【上一环节已收集的岗位】" in captured_tasks[1]
 
+    # The real downstream handlers consume ToolContext.metadata, which the
+    # controller derives from RunRequest.private_context.  Seed artifacts
+    # alone therefore cannot provide inherited evidence to those handlers.
+    downstream_request = captured_requests[1]
+    downstream_context = downstream_request.private_context
+    assert downstream_context is not None
+    assert downstream_context["confirmed_profile_facts"]
+    evidence = downstream_context["observed_public_evidence"]
+    assert len(evidence) == 1
+    assert {
+        key: evidence[0][key]
+        for key in ("source_url", "content_hash", "artifact_type", "visible_text")
+    } == {
+        "source_url": "https://example.com/job/1",
+        "content_hash": _sha256_hex("page:https://example.com/job/1"),
+        "artifact_type": "public_job_page",
+        "visible_text": (
+            "负责后端系统开发与维护，需要3年以上Java经验。\n"
+            "岗位要求：Java, Spring Boot, MySQL"
+        ),
+    }
+    assert evidence[0]["artifact_id"]
+    candidates = downstream_context["structured_job_candidates"]
+    assert len(candidates) == 1
+    assert candidates[0]["source_url"] == "https://example.com/job/1"
+    assert candidates[0]["title"] == "Java 后端开发工程师"
+    assert candidates[0]["company"] == "示例科技"
+    assert candidates[0]["locations"] == ["北京"]
+
+    # The context payload must not share nested candidate objects with seed
+    # artifacts, whose consumers may mutate their local content.
+    structured_seed = next(
+        artifact
+        for artifact in downstream_request.seed_artifacts or []
+        if artifact.artifact_type == "structured_job_details"
+    )
+    structured_seed.content["candidates"][0]["title"] = "mutated seed"
+    assert candidates[0]["title"] == "Java 后端开发工程师"
+
     # File written, no tmp leftover.
     assert (out_dir / f"{cid}.json").exists()
     assert not (out_dir / f"{cid}.json.tmp").exists()
 
 
+@pytest.mark.asyncio
+async def test_two_link_chain_matching_fallback_uses_inherited_candidates(
+    tmp_path: Path,
+    controller_factory: Any,
+    stub_registry: tuple[Any, dict[str, int]],
+) -> None:
+    """An undelegated L2 match falls back to the inherited candidate payload."""
+    _reg, counts = stub_registry
+    cid = "C001-fallback"
+    _make_chain_file(tmp_path, cid, [_discovery_link(), _matching_link()])
+    out_dir = tmp_path / "out"
+
+    # Link 1: collect one structured candidate.
+    push_script(
+        FauxScript(
+            tool_calls=[
+                ToolCall(
+                    id="s1",
+                    name="delegate-job-discovery",
+                    arguments={"task_goal": "找Java岗位"},
+                )
+            ]
+        )
+    )
+    push_script(
+        FauxScript(
+            tool_calls=[
+                ToolCall(
+                    id="d1",
+                    name="fetch-public-job-pages",
+                    arguments={"urls": ["https://example.com/job/1"]},
+                )
+            ]
+        )
+    )
+    push_script(
+        FauxScript(
+            tool_calls=[
+                ToolCall(
+                    id="d2",
+                    name="extract-observed-job-details-batch",
+                    arguments={"artifact_ids": ["art-fetch-1"]},
+                )
+            ]
+        )
+    )
+    push_script(FauxScript(text="发现完成。"))
+    push_script(FauxScript(text="职位发现完成。"))
+
+    # Link 2: return directly rather than delegating job-matching.  The
+    # controller must invoke its deterministic matching fallback.
+    push_script(FauxScript(text="请使用已收集的岗位完成匹配。"))
+
+    record = await run_chain(
+        cid,
+        question_dir=tmp_path,
+        out_dir=out_dir,
+        model_id="faux",
+        controller_factory=controller_factory,
+    )
+
+    assert counts["match-observed-jobs"] == 1
+    assert record["result"]["status"] == "succeeded"
+    fallback_reports = [
+        artifact
+        for artifact in record["links"][1]["artifacts"]
+        if artifact["artifact_type"] == "job_matching_report"
+    ]
+    assert len(fallback_reports) == 1
+    matches = fallback_reports[0]["content_json"]["matches"]
+    assert len(matches) == 1
+    assert matches[0]["title"] == "Java 后端开发工程师"
+    assert matches[0]["source_url"] == "https://example.com/job/1"
+
+
 # ======================================================================
-# 2. Broken chain: link1 waiting_user → link2 NOT run
+# 2. Raw C003-style 3-link planning chain
+# ======================================================================
+
+
+def test_c003_style_raw_three_link_schema_and_planning_audit() -> None:
+    """A real adapter plan audits against inherited full JD content, not a seed."""
+    source_url = "https://example.com/c003-jd"
+    jd_hash = _sha256_hex("c003:jd")
+    page = {
+        "artifact_id": "c003-page",
+        "artifact_type": "public_job_page",
+        "source_url": source_url,
+        "content_hash": jd_hash,
+        "quality": "jd_complete",
+        "content_json": {
+            "visible_text": "大模型应用开发工程师。岗位要求 Python、RAG 和 LangChain。",
+        },
+    }
+    structured_candidate = {
+        "candidate_id": "c003-candidate",
+        "artifact_id": "c003-canonical-jd",
+        "source_artifact_id": "c003-page",
+        "source_url": source_url,
+        "title": "大模型应用开发工程师",
+        "full_text": (
+            "大模型应用开发工程师。岗位要求 Python、RAG 和 LangChain；"
+            "负责生产环境中的 LLM 应用开发与评估。"
+        ),
+        "responsibilities": "负责生产环境中的 LLM 应用开发与 RAG 评估。",
+        "requirements": "熟悉 Python、RAG 和 LangChain。",
+    }
+    structured = {
+        "artifact_id": "c003-canonical-jd",
+        "artifact_type": "structured_job_details",
+        "source_url": source_url,
+        "content_hash": jd_hash,
+        "quality": "job_bearing",
+        "content_json": {"candidates": [structured_candidate]},
+    }
+    plan_output = build_preparation_plan(
+        ToolContext(
+            user_id="eval-c003",
+            run_id="run-c003",
+            metadata={
+                "observed_public_evidence": [
+                    {
+                        "artifact_id": "c003-page",
+                        "source_url": source_url,
+                        "visible_text": page["content_json"]["visible_text"],
+                    }
+                ],
+                "structured_job_candidates": [structured_candidate],
+                "task_goal": "为大模型应用开发工程师准备面试。",
+            },
+        ),
+        BuildPreparationPlanInput(
+            target_artifact_id="c003-candidate",
+            focus_keywords=["Python", "RAG"],
+            time_budget_hours=2,
+        ),
+    )
+    matching = {
+        "artifact_id": "c003-match",
+        "artifact_type": "job_matching_report",
+        "content_json": {
+            "matches": [{"candidate_id": "candidate-1", "score": 0.95}],
+            "input_refs": [
+                {
+                    "artifact_id": "c003-canonical-jd",
+                    "source_url": source_url,
+                    "content_hash": jd_hash,
+                }
+            ],
+        },
+    }
+    planning = {
+        "artifact_id": "c003-plan",
+        "artifact_type": "career_preparation_plan",
+        "source_url": source_url,
+        "content_hash": _sha256_hex("c003:plan"),
+        "quality": "job_bearing",
+        "content_json": plan_output.model_dump(mode="json"),
+    }
+    link1 = _raw_chain_link("C003-L1", [page, structured], skills=["job-discovery"])
+    link2 = _raw_chain_link("C003-L2", [matching], skills=["job-matching"])
+    link3 = _raw_chain_link("C003-L3", [planning], skills=["career-planning"])
+    chain = {
+        "schema_version": "pi_eval_record_v1",
+        "id": "C003",
+        "type": "chain",
+        "chain_length": 3,
+        "links": [link1, link2, link3],
+        "result": {"status": "succeeded", "summary": "Three links completed."},
+        "audit": {},
+        "wall_seconds": 0.0,
+    }
+
+    validate_record(chain)
+    result = audit_chain(chain)
+
+    assert result["status"] == "passed"
+    assert result["links"][2]["skill"] == "planning"
+    assert result["links"][2]["checks"]["planning"]["status"] == "passed"
+    assert planning["content_json"]["target_artifact_id"] == "c003-canonical-jd"
+    assert planning["content_json"]["selected_target_reference"] == "c003-candidate"
+    # A plan has a source URL but is not job-bearing input for a later link.
+    assert _candidate_urls_from_artifacts([planning]) == []
+    assert _bounded_inherited_evidence([planning]) == []
+
+
+# ======================================================================
+# 3. Broken chain: link1 waiting_user → link2 NOT run
 # ======================================================================
 
 
@@ -641,9 +884,9 @@ def test_inherited_goal_supplement_exact_templates() -> None:
     assert "【上一环节已收集的岗位】" in supplement
     assert "【候选人已确认事实（简历）】" in supplement
 
-    # Candidate line format (with artifact id).
-    assert "（证据 artifact: cand-001）" in supplement
-    assert "｜" in supplement  # separator
+    # Candidate business fields stay persisted; only evidence refs cross links.
+    assert "证据 refs: cand-001" in supplement
+    assert "seed artifacts" in supplement
 
     # Facts capped at 12.
     fact_lines = [

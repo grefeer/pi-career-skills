@@ -1,7 +1,7 @@
 [project]
 name = "pi-py-career-skills"
 version = "0.1.0"
-description = "Pi-py port of the career assistant job skills (job-discovery / job-matching / resume-tailoring) + run-level harness"
+description = "Pi-py port of the career assistant job skills (job-discovery / job-matching / resume-tailoring / career-planning) + run-level harness"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"

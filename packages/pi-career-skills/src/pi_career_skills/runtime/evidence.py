@@ -459,6 +459,18 @@ class EvidenceStore:
             ).hexdigest()
             return [brief]
 
+        if artifact_type == "career_preparation_plan":
+            if not isinstance(output.get("source_url"), str):
+                return []
+            if not isinstance(output.get("plan_items"), list) or not output["plan_items"]:
+                return []
+            canonical = canonical_json(dict(output))
+            plan = dict(output)
+            plan["content_hash"] = hashlib.sha256(
+                canonical.encode("utf-8")
+            ).hexdigest()
+            return [plan]
+
         # public_job_page, structured_job_details, job_search_results.
         return _extract_candidates(output)
 

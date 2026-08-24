@@ -417,7 +417,91 @@ def test_cli_duplicate_id_fails_closed(tmp_path: Path) -> None:
 
 
 # ======================================================================
-# 5. wall_seconds >= 0
+# 5. Manifest id formats and fail-closed validation
+# ======================================================================
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [{"id": "Q011"}, {"id": "C001"}, {"id": "R002"}],
+        {"ids": [{"id": "Q011"}, {"id": "C001"}, {"id": "R002"}]},
+    ],
+)
+def test_load_ids_from_manifest_accepts_object_entries(
+    tmp_path: Path, payload: Any
+) -> None:
+    from pi_career_skills.evaluation.cli import _load_ids_from_manifest
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert _load_ids_from_manifest(manifest_path) == ["Q011", "C001", "R002"]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        ["Q011", "C001", "R002"],
+        {"ids": ["Q011", "C001", "R002"]},
+    ],
+)
+def test_load_ids_from_manifest_accepts_legacy_string_entries(
+    tmp_path: Path, payload: Any
+) -> None:
+    from pi_career_skills.evaluation.cli import _load_ids_from_manifest
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert _load_ids_from_manifest(manifest_path) == ["Q011", "C001", "R002"]
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        [{"id": "Q011"}, "C001"],
+        ["Q011", {"id": "C001"}],
+    ],
+)
+def test_load_ids_from_manifest_rejects_mixed_entry_formats(
+    tmp_path: Path, entries: list[Any]
+) -> None:
+    from pi_career_skills.evaluation.cli import _load_ids_from_manifest
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(entries), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Cannot extract ids from manifest"):
+        _load_ids_from_manifest(manifest_path)
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        [{"kind": "keep"}],
+        [{"id": ""}],
+        [{"id": "   "}],
+        [{"id": 11}],
+        [None],
+        [11],
+        {"ids": "Q011"},
+    ],
+)
+def test_load_ids_from_manifest_rejects_invalid_entries(
+    tmp_path: Path, entries: list[Any]
+) -> None:
+    from pi_career_skills.evaluation.cli import _load_ids_from_manifest
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(entries), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Cannot extract ids from manifest"):
+        _load_ids_from_manifest(manifest_path)
+
+
+# ======================================================================
+# 6. wall_seconds >= 0
 # ======================================================================
 
 
@@ -601,7 +685,7 @@ def test_all_skills_reexported() -> None:
     from pi_career_skills.evaluation.seed_urls import ALL_SKILLS as SEED_ALL
 
     assert ALL_SKILLS == SEED_ALL
-    assert len(ALL_SKILLS) == 3
+    assert len(ALL_SKILLS) == 4
     assert "job-discovery" in ALL_SKILLS
     assert "job-matching" in ALL_SKILLS
     assert "resume-tailoring" in ALL_SKILLS

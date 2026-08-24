@@ -1,9 +1,9 @@
 """Supervisor + per-delegation skill agents (migration plan §4.2).
 
-The supervisor sees ONLY the three ``delegate-<skill>`` tools; the business
+The supervisor sees ONLY the four ``delegate-<skill>`` tools; the business
 tools are never granted to it (tool_adapter re-checks skill isolation as
 defense in depth anyway).  Each delegation runs a FRESH skill agent with
-exactly its own skill's catalog (10 / 1 / 1) and its curated prompt —
+exactly its own skill's catalog (10 / 1 / 1 / 1) and its curated prompt —
 messages are never shared or reused across delegations.
 
 Budgets, evidence promotion and events are NOT wired here; the Phase 7
@@ -18,14 +18,17 @@ from pi_agent_core import Agent, AgentOptions, AgentState
 from pi_ai import Model
 
 from ..context import ToolContext
-from ..registry import TOOL_CATALOG_BY_SKILL, build_career_tool_registry
+from ..registry import build_career_tool_registry
 from ..tool_adapter import make_agent_tool
+from .capabilities import CAPABILITY_REGISTRY
 from .delegation_tools import DelegationRunner, make_delegation_tool
 from .prompts import (
+    CAREER_PLANNING_PROMPT,
     JOB_DISCOVERY_PROMPT,
     JOB_MATCHING_PROMPT,
     RESUME_TAILORING_PROMPT,
     SUPERVISOR_PROMPT,
+    load_archived_skill_prompt,
 )
 
 #: Curated prompt per skill (single source: agents/prompts.py).
@@ -33,10 +36,11 @@ _SKILL_PROMPTS: dict[str, str] = {
     "job-discovery": JOB_DISCOVERY_PROMPT,
     "job-matching": JOB_MATCHING_PROMPT,
     "resume-tailoring": RESUME_TAILORING_PROMPT,
+    "career-planning": CAREER_PLANNING_PROMPT,
 }
 
 #: The supervisor may delegate to exactly these skills, in this order.
-_SUPERVISOR_SKILLS: tuple[str, ...] = ("job-discovery", "job-matching", "resume-tailoring")
+_SUPERVISOR_SKILLS: tuple[str, ...] = tuple(CAPABILITY_REGISTRY)
 
 #: Registered definitions — resolves catalog names to ``ToolDefinition``.
 _REGISTRY = build_career_tool_registry()
@@ -56,7 +60,7 @@ def build_supervisor_agent(
 ) -> Agent:
     """Build the supervisor agent with delegation tools for allowed skills.
 
-    When ``allowed_skills`` is ``None`` (default), all three skills are
+    When ``allowed_skills`` is ``None`` (default), all four skills are
     exposed — identical to the historical behavior.  Otherwise only the
     skills present in *both* ``allowed_skills`` and ``_SUPERVISOR_SKILLS``
     are included, preserving ``_SUPERVISOR_SKILLS`` order.
@@ -117,17 +121,16 @@ def build_skill_agent(
     Raises:
         ValueError: for an unknown ``skill_name``.
     """
-    if skill_name not in TOOL_CATALOG_BY_SKILL:
+    if skill_name not in CAPABILITY_REGISTRY:
         raise ValueError(f"unknown skill: {skill_name}")
     reg = registry if registry is not None else _REGISTRY
-    tools = [
-        make_agent_tool(reg[name], context)
-        for name in TOOL_CATALOG_BY_SKILL[skill_name]
-    ]
+    tools = [make_agent_tool(reg[name], context) for name in CAPABILITY_REGISTRY[skill_name].tool_names]
     return Agent(
         AgentOptions(
             initial_state=AgentState(
-                system_prompt=_SKILL_PROMPTS[skill_name],
+                system_prompt=load_archived_skill_prompt(
+                    skill_name, _SKILL_PROMPTS[skill_name]
+                ),
                 model=model,
                 tools=tools,
             ),

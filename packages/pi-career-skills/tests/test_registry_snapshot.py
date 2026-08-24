@@ -1,6 +1,6 @@
 """Snapshot gate for the tool registry (migration plan §3.1 / §6.4).
 
-Compares the 12 registered tool definitions against
+Compares the 13 registered tool definitions against
 ``fixtures/pi_contract_snapshot.json`` (generated from the source project):
 name / skill_name / is_deliverable / artifact_type / description must match
 exactly, and the input/output pydantic JSON schemas must be field-equal.
@@ -23,11 +23,17 @@ from pi_career_skills.registry import (
 _FIXTURES = Path(__file__).parent / "fixtures"
 _SNAPSHOT = json.loads((_FIXTURES / "pi_contract_snapshot.json").read_text("utf-8"))
 
-EXPECTED_SKILL_COUNTS = {"job-discovery": 10, "job-matching": 1, "resume-tailoring": 1}
+EXPECTED_SKILL_COUNTS = {
+    "job-discovery": 10,
+    "job-matching": 1,
+    "resume-tailoring": 1,
+    "career-planning": 1,
+}
 EXPECTED_DELIVERABLE_COUNTS = {
     "job-discovery": 7,  # fetch-pages/page/wechat/search/sheets/extract/extract-batch
     "job-matching": 1,
     "resume-tailoring": 1,
+    "career-planning": 1,
 }
 
 
@@ -41,10 +47,10 @@ def _snapshot_tools() -> dict[str, dict]:
 
 
 def test_snapshot_metadata() -> None:
-    """Snapshot shape sanity: schema version + 12 tools."""
+    """Snapshot shape sanity: schema version + 13 tools."""
     assert _SNAPSHOT["schema_version"] == "pi_contract_v1"
-    assert _SNAPSHOT["tool_count"] == 12
-    assert len(_snapshot_tools()) == 12
+    assert _SNAPSHOT["tool_count"] == 13
+    assert len(_snapshot_tools()) == 13
 
 
 def test_registry_has_exactly_the_snapshot_tool_names(registry: object) -> None:

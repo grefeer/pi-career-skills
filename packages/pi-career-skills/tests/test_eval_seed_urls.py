@@ -6,7 +6,8 @@ SEED_URLS is a VERBATIM port of source parity_support.py (17 Q + 14 C-L1
 without KeyError.
 
 Covers:
-- ALL_SKILLS matches source.
+- ALL_SKILLS preserves the source skills plus the intentional local
+  career-planning extension.
 - Every URL in SEED_URLS starts with http(s):// and has no userinfo.
 - resolve_seed_urls returns empty for unknown ids (no KeyError).
 - All 83 manifest ids + all chain link ids resolve without KeyError
@@ -43,8 +44,14 @@ manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 # ====================================================================
 
 
-def test_all_skills_matches_source() -> None:
-    assert ALL_SKILLS == ["job-discovery", "job-matching", "resume-tailoring"]
+def test_all_skills_includes_career_planning_local_extension() -> None:
+    """The migrated planning capability is routable even though source seeds need none."""
+    assert ALL_SKILLS == [
+        "job-discovery",
+        "job-matching",
+        "resume-tailoring",
+        "career-planning",
+    ]
 
 
 # ====================================================================

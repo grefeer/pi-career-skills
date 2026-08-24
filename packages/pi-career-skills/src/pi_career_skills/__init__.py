@@ -1,7 +1,7 @@
 """pi-career-skills: Pi-py port of the career assistant job skills.
 
-A run-level eval runtime that migrates the three career skills
-(job-discovery / job-matching / resume-tailoring), the 12 deterministic
+A run-level eval runtime that migrates the four career skills
+(job-discovery / job-matching / resume-tailoring / career-planning), the 13 deterministic
 career tools, and the trusted-kernel harness semantics (evidence store,
 completion gate, budgets, stall, bounded auto-recovery) onto pi-py agents.
 

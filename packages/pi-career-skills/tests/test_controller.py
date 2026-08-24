@@ -12,12 +12,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from pi_ai import ToolCall
 from pi_ai.providers.faux import FAUX_MODEL, FauxScript, clear_scripts, push_script
+from pi_career_skills.business.job_discovery.handlers import (
+    extract_observed_job_details_batch,
+)
 from pi_career_skills.business.job_discovery.models import (
     ExtractedJobDetails,
     ExtractObservedJobDetailsBatchInput,
@@ -33,12 +37,14 @@ from pi_career_skills.business.job_matching.job_matching import (
     MatchObservedJobsInput,
     MatchObservedJobsOutput,
     ObservedJobMatch,
+    match_observed_jobs,
 )
 from pi_career_skills.business.resume_tailoring.resume_tailoring import (
     BuildResumeTailoringBriefInput,
     ResumeTailoringBriefOutput,
     ResumeTailoringDiff,
 )
+from pi_career_skills.contracts import Artifact
 from pi_career_skills.errors import (
     AUTO_RECOVERY_LIMIT_REACHED,
     BUDGET_EXHAUSTED,
@@ -47,8 +53,10 @@ from pi_career_skills.errors import (
     NO_PROGRESS,
 )
 from pi_career_skills.registry import ToolDefinition
+from pi_career_skills.runtime.agent_hooks import ControllerHooks
 from pi_career_skills.runtime.budgets import BudgetLimits
 from pi_career_skills.runtime.controller import CareerRunController, RunRequest
+from pi_career_skills.runtime.evidence import EvidenceStore
 
 # ======================================================================
 # Helpers
@@ -77,7 +85,9 @@ class StubHandler:
         return self._fn(ctx, params)
 
 
-def build_stub_registry() -> tuple[Any, dict[str, int]]:
+def build_stub_registry(
+    *, real_extractor: bool = False, real_matcher: bool = False
+) -> tuple[Any, dict[str, int]]:
     """Build a stub registry + call-count dict.
 
     The returned registry implements ``.get(name)`` returning ``ToolDefinition``
@@ -206,7 +216,10 @@ def build_stub_registry() -> tuple[Any, dict[str, int]]:
         skill_name="job-discovery",
         input_model=ExtractObservedJobDetailsBatchInput,
         output_model=ExtractObservedJobDetailsBatchOutput,
-        handler=_wrap("extract-observed-job-details-batch", _extract_batch),
+        handler=_wrap(
+            "extract-observed-job-details-batch",
+            extract_observed_job_details_batch if real_extractor else _extract_batch,
+        ),
         is_deliverable=True,
         artifact_type="structured_job_details",
         description="stub extract batch",
@@ -248,7 +261,9 @@ def build_stub_registry() -> tuple[Any, dict[str, int]]:
         skill_name="job-matching",
         input_model=MatchObservedJobsInput,
         output_model=MatchObservedJobsOutput,
-        handler=_wrap("match-observed-jobs", _match_jobs),
+        handler=_wrap(
+            "match-observed-jobs", match_observed_jobs if real_matcher else _match_jobs
+        ),
         is_deliverable=True,
         artifact_type="job_matching_report",
         description="stub match jobs",
@@ -381,6 +396,168 @@ async def test_success_single_skill(
     assert result.attempt_count == 1
     assert counts["fetch-public-job-pages"] == 1
     assert counts["extract-observed-job-details-batch"] == 1
+
+
+async def test_discovery_projects_new_page_evidence_for_real_extraction_handler() -> None:
+    """A page promoted in a delegation is available to its next tool call."""
+    registry, counts = build_stub_registry(real_extractor=True)
+    controller = CareerRunController(
+        FAUX_MODEL,
+        registry=registry,
+        get_api_key=lambda provider: "test-key",
+    )
+    push_script(
+        FauxScript(
+            tool_calls=[
+                ToolCall(
+                    id="s1",
+                    name="delegate-job-discovery",
+                    arguments={"task_goal": "找Java后端岗位"},
+                )
+            ]
+        )
+    )
+    push_script(
+        FauxScript(
+            tool_calls=[
+                ToolCall(
+                    id="d1",
+                    name="fetch-public-job-pages",
+                    arguments={"urls": ["https://example.com/job/1"]},
+                )
+            ]
+        )
+    )
+    push_script(
+        FauxScript(
+            tool_calls=[
+                ToolCall(
+                    id="d2",
+                    name="extract-observed-job-details-batch",
+                    arguments={"artifact_ids": ["art-fetch-1"]},
+                )
+            ]
+        )
+    )
+    push_script(FauxScript(text="已完成职位发现。"))
+    push_script(FauxScript(text="已为您找到Java后端岗位。"))
+
+    result = await controller.run(
+        RunRequest(task="帮我找Java后端岗位", needed_skills=("job-discovery",))
+    )
+
+    assert result.status == "succeeded"
+    assert "job-discovery" in result.completed_skills
+    assert counts["extract-observed-job-details-batch"] == 1
+    assert any(
+        artifact["artifact_type"] == "structured_job_details"
+        for artifact in result.artifacts
+    )
+    extraction_events = [
+        event
+        for event in result.events
+        if event.type == "tool_observation"
+        and event.payload["tool_name"] == "extract-observed-job-details-batch"
+    ]
+    assert extraction_events[-1].payload["status"] == "succeeded"
+
+
+async def test_seeded_pages_leave_room_for_live_real_extraction() -> None:
+    """RunRequest seeds cannot hide a newly fetched page from the real handler."""
+    registry, counts = build_stub_registry(real_extractor=True)
+    controller = CareerRunController(
+        FAUX_MODEL,
+        registry=registry,
+        get_api_key=lambda provider: "test-key",
+    )
+    seed_artifacts = [
+        Artifact(
+            artifact_id=f"seed-page-{index}",
+            artifact_type="public_job_page",
+            tool_name="fetch-public-job-pages",
+            source_url=f"https://example.com/seed-{index}",
+            content_hash=_sha256_hex(f"seed-page-{index}"),
+            quality="jd_complete",
+            content={"visible_text": "seed" * 3_000},
+        )
+        for index in range(2)
+    ]
+    push_script(
+        FauxScript(
+            tool_calls=[
+                ToolCall(
+                    id="s1",
+                    name="delegate-job-discovery",
+                    arguments={"task_goal": "找Java后端岗位"},
+                )
+            ]
+        )
+    )
+    push_script(
+        FauxScript(
+            tool_calls=[
+                ToolCall(
+                    id="d1",
+                    name="fetch-public-job-pages",
+                    arguments={"urls": ["https://example.com/job/1"]},
+                )
+            ]
+        )
+    )
+    push_script(
+        FauxScript(
+            tool_calls=[
+                ToolCall(
+                    id="d2",
+                    name="extract-observed-job-details-batch",
+                    arguments={"artifact_ids": ["art-fetch-1"]},
+                )
+            ]
+        )
+    )
+    push_script(FauxScript(text="职位发现完成。"))
+    push_script(FauxScript(text="已找到岗位。"))
+
+    result = await controller.run(
+        RunRequest(
+            task="找Java后端岗位",
+            needed_skills=("job-discovery",),
+            seed_artifacts=seed_artifacts,
+            private_context={
+                "confirmed_profile_facts": [{"field": "skill", "value": "Java"}]
+            },
+        )
+    )
+
+    assert result.status == "succeeded"
+    assert counts["extract-observed-job-details-batch"] == 1
+    assert any(
+        artifact["artifact_type"] == "structured_job_details"
+        and artifact["source_url"] == "https://example.com/job/1"
+        for artifact in result.artifacts
+    )
+
+
+@pytest.mark.parametrize(
+    "private_context", (["not", "a", "mapping"], "not-a-mapping", 7)
+)
+async def test_controller_ignores_non_mapping_private_context(
+    controller: CareerRunController, private_context: Any
+) -> None:
+    """Top-level malformed context fails closed before any delegation setup."""
+    push_script(FauxScript(text="请补充职位偏好。"))
+
+    result = await controller.run(
+        RunRequest(
+            task="测试上下文边界",
+            allowed_skills=(),
+            needed_skills=(),
+            private_context=private_context,
+        )
+    )
+
+    assert result.status == "waiting_user"
+    assert result.error_code == COMPLETION_EVIDENCE_UNAVAILABLE
 
 
 # ======================================================================
@@ -1024,6 +1201,152 @@ async def test_matching_fallback(
     assert result.status == "succeeded"
     assert "job-matching" in result.completed_skills
     assert any(r["artifact_type"] == "job_matching_report" for r in result.refs)
+
+
+async def test_matching_fallback_projects_store_for_real_matcher() -> None:
+    """Fallback persists a real match after in-run fetch and extraction."""
+    registry, counts = build_stub_registry(real_extractor=True, real_matcher=True)
+    controller = CareerRunController(
+        FAUX_MODEL,
+        registry=registry,
+        get_api_key=lambda provider: "test-key",
+    )
+    push_script(
+        FauxScript(
+            tool_calls=[
+                ToolCall(
+                    id="s1",
+                    name="delegate-job-discovery",
+                    arguments={"task_goal": "找Java后端岗位"},
+                )
+            ]
+        )
+    )
+    push_script(
+        FauxScript(
+            tool_calls=[
+                ToolCall(
+                    id="d1",
+                    name="fetch-public-job-pages",
+                    arguments={"urls": ["https://example.com/job/1"]},
+                )
+            ]
+        )
+    )
+    push_script(
+        FauxScript(
+            tool_calls=[
+                ToolCall(
+                    id="d2",
+                    name="extract-observed-job-details-batch",
+                    arguments={"artifact_ids": ["art-fetch-1"]},
+                )
+            ]
+        )
+    )
+    push_script(FauxScript(text="职位发现完成。"))
+    push_script(FauxScript(text="所有工作完成。"))
+
+    result = await controller.run(
+        RunRequest(
+            task="找并匹配Java岗位",
+            needed_skills=("job-discovery", "job-matching"),
+        )
+    )
+
+    reports = [
+        artifact
+        for artifact in result.artifacts
+        if artifact["artifact_type"] == "job_matching_report"
+    ]
+    assert counts["match-observed-jobs"] == 1
+    assert result.status == "succeeded"
+    assert reports
+    assert reports[0]["content_json"]["matches"]
+    assert "Java" in reports[0]["content_json"]["matches"][0]["title"]
+
+
+async def test_delegation_refresh_callback_cleanup_preserves_newer_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Build failures clear only the callback installed by that delegation."""
+    registry, _counts = build_stub_registry()
+    controller = CareerRunController(
+        FAUX_MODEL, registry=registry, get_api_key=lambda provider: "test-key"
+    )
+    hooks = ControllerHooks(
+        stream_fn=None,
+        should_stop_after_turn=None,
+        before_tool_call=None,
+        after_tool_call=None,
+        agent_ref_box=[None],
+        context_refresh_box=[None],
+    )
+    state = SimpleNamespace(
+        completed_skills=set(), synthetic_user_id="user", run_id="run"
+    )
+
+    class _Guard:
+        def reset_stall_on_delegation(self) -> None:
+            return None
+
+    guard = _Guard()
+    def later_callback() -> None:
+        return None
+
+    replace_callback = True
+
+    def _failing_build(*args: Any, **kwargs: Any) -> Any:
+        del args, kwargs
+        if replace_callback:
+            hooks.context_refresh_box[0] = later_callback
+        raise RuntimeError("build failed")
+
+    monkeypatch.setattr(
+        "pi_career_skills.runtime.controller.build_skill_agent", _failing_build
+    )
+
+    async def _run() -> None:
+        await controller._run_skill_delegation(
+            skill="job-discovery",
+            task_goal="goal",
+            params={},
+            state=state,
+            store=EvidenceStore(),
+            tracker=object(),
+            guard=guard,
+            event_log=object(),
+            hooks=hooks,
+            allowed_skills=("job-discovery",),
+            attempt_id="attempt",
+            halt_box=[None],
+        )
+
+    with pytest.raises(RuntimeError, match="build failed"):
+        await _run()
+    assert hooks.context_refresh_box[0] is later_callback
+
+    replace_callback = False
+    hooks.context_refresh_box[0] = None
+    with pytest.raises(RuntimeError, match="build failed"):
+        await _run()
+    assert hooks.context_refresh_box[0] is None
+
+    class _PromptFailure:
+        async def prompt(self, task_goal: str) -> None:
+            del task_goal
+            raise RuntimeError("prompt failed")
+
+    def _build_prompt_failure(*args: Any, **kwargs: Any) -> _PromptFailure:
+        del args, kwargs
+        return _PromptFailure()
+
+    monkeypatch.setattr(
+        "pi_career_skills.runtime.controller.build_skill_agent", _build_prompt_failure
+    )
+    with pytest.raises(RuntimeError, match="prompt failed"):
+        await _run()
+    assert hooks.context_refresh_box[0] is None
 
 
 # ======================================================================

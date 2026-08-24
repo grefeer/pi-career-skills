@@ -21,6 +21,7 @@ from pi_career_skills.agents.delegation_tools import (
 )
 from pi_career_skills.agents.factory import build_skill_agent, build_supervisor_agent
 from pi_career_skills.agents.prompts import (
+    CAREER_PLANNING_PROMPT,
     JOB_DISCOVERY_PROMPT,
     JOB_MATCHING_PROMPT,
     PROMPT_HASHES,
@@ -36,11 +37,21 @@ from pi_career_skills.errors import (
 from pi_career_skills.registry import TOOL_CATALOG_BY_SKILL
 
 SUPERVISOR_DELEGATE_TOOLS = frozenset(
-    {"delegate-job-discovery", "delegate-job-matching", "delegate-resume-tailoring"}
+    {
+        "delegate-job-discovery",
+        "delegate-job-matching",
+        "delegate-resume-tailoring",
+        "delegate-career-planning",
+    }
 )
 #: Representative business tool names the supervisor must never see.
 BUSINESS_TOOL_NAMES = frozenset(
-    {"fetch-public-job-pages", "match-observed-jobs", "build-resume-tailoring-brief"}
+    {
+        "fetch-public-job-pages",
+        "match-observed-jobs",
+        "build-resume-tailoring-brief",
+        "build-preparation-plan",
+    }
 )
 
 _CTX = ToolContext(user_id="user-1", run_id="run-1")
@@ -81,7 +92,7 @@ def _visible_text(agent: Any) -> str:
 
 
 def test_supervisor_scoping() -> None:
-    """Supervisor sees ONLY the three delegate tools — no business tools."""
+    """Supervisor sees ONLY the four delegate tools — no business tools."""
     agent = build_supervisor_agent(FAUX_MODEL, _fake_runner([], DelegationOutcome(skill="job-discovery", status="succeeded")))
     names = {tool.name for tool in agent.state.tools}
     assert names == SUPERVISOR_DELEGATE_TOOLS
@@ -89,9 +100,14 @@ def test_supervisor_scoping() -> None:
 
 
 def test_skill_scoping() -> None:
-    """Each skill agent sees exactly its own catalog (10/1/1), nothing else."""
-    counts = [len(names) for names in TOOL_CATALOG_BY_SKILL.values()]
-    assert counts == [10, 1, 1]
+    """Each skill agent sees exactly its own catalog (10/1/1/1), nothing else."""
+    counts = {skill: len(names) for skill, names in TOOL_CATALOG_BY_SKILL.items()}
+    assert counts == {
+        "job-discovery": 10,
+        "job-matching": 1,
+        "resume-tailoring": 1,
+        "career-planning": 1,
+    }
     for skill, expected in TOOL_CATALOG_BY_SKILL.items():
         agent = build_skill_agent(skill, FAUX_MODEL, _CTX)
         names = [tool.name for tool in agent.state.tools]
@@ -266,23 +282,25 @@ def test_unknown_skill_raises() -> None:
         build_skill_agent("nope", FAUX_MODEL, _CTX)
 
 
-#: sha256 (UTF-8) of the verbatim source prompts, pinned at port time.
+#: sha256 (UTF-8) of the curated migration prompts, pinned at port time.
 _VERBATIM_HASHES = {
-    "supervisor": "6b518849a662067c7744168f389ac677e21cf5792756ef2fe54d7be14798d23c",
+    "supervisor": "38d6d67087e13505bd82d06f587322dd7fd66a50775fb9ab435c9330f5d3e075",
     "job-discovery": "677ecab69aab6741b4e6938689fced40d0af48cecd573255ca97694e5fc3769b",
-    "job-matching": "4d8449c117a3bdb0cbfc64fa55c5502c12d9ea04d073e65c1469c56f7554530d",
+    "job-matching": "b1ec5fe666720c42d61a0d55d09294d799c929cea5d27781e34dd77f2cc80183",
     "resume-tailoring": "36bd80a0b851dcb6cde7c6612d3266bb4e846ed8e519a1de489bd11557d471e5",
+    "career-planning": "6ca185c654d95a30e8cbe72f65b6250bb8879c91a62cf832a644c066f71ad9c8",
 }
 
 
 def test_prompt_hashes() -> None:
-    """PROMPT_HASHES covers exactly the four prompts, computed from the
-    actual module strings, and matches the verbatim source text (pinned)."""
+    """PROMPT_HASHES covers exactly the five prompts, computed from the
+    actual module strings, and matches the pinned migration contract."""
     prompts = {
         "supervisor": SUPERVISOR_PROMPT,
         "job-discovery": JOB_DISCOVERY_PROMPT,
         "job-matching": JOB_MATCHING_PROMPT,
         "resume-tailoring": RESUME_TAILORING_PROMPT,
+        "career-planning": CAREER_PLANNING_PROMPT,
     }
     assert set(PROMPT_HASHES) == set(prompts)
     for key, prompt in prompts.items():

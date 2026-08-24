@@ -32,13 +32,20 @@ _SKIP_FILENAMES: frozenset[str] = frozenset(
 )
 
 
+def _result_json_files(directory: Path) -> list[Path]:
+    """Return result JSON files below *directory* in deterministic order."""
+    return sorted(
+        path for path in directory.rglob("*.json") if path.name not in _SKIP_FILENAMES
+    )
+
+
 def merge_results(pi_dir: Path) -> list[dict[str, Any]]:
     """Load and validate all JSON records from *pi_dir*.
 
-    Reads every ``*.json`` file except ``launch_manifest.json`` and
-    ``summary.json``.  Validates each via ``validate_record``; fails closed
-    on schema errors (prints errors and exits non-zero when called via CLI,
-    raises ValueError when called as a library).
+    Reads every ``*.json`` file recursively except known metadata files.
+    Validates each via ``validate_record``; fails closed on schema errors or
+    duplicate record IDs (prints errors and exits non-zero when called via
+    CLI, raises ValueError when called as a library).
 
     Args:
         pi_dir: Directory containing eval result JSON files.
@@ -47,18 +54,24 @@ def merge_results(pi_dir: Path) -> list[dict[str, Any]]:
         List of validated record dicts.
 
     Raises:
-        ValueError: When any record fails schema validation.
+        ValueError: When any record fails schema validation or has a duplicate ID.
     """
     records: list[dict[str, Any]] = []
     errors: list[str] = []
 
-    json_files = sorted(pi_dir.glob("*.json"))
-    for jf in json_files:
-        if jf.name in _SKIP_FILENAMES:
-            continue
+    record_paths: dict[str, Path] = {}
+    for jf in _result_json_files(pi_dir):
         try:
             record = json.loads(jf.read_text(encoding="utf-8"))
             validate_record(record)
+            record_id = record["id"]
+            previous_path = record_paths.get(record_id)
+            if previous_path is not None:
+                errors.append(
+                    f"Duplicate record ID {record_id!r}: {previous_path} and {jf}"
+                )
+                continue
+            record_paths[record_id] = jf
             records.append(record)
         except Exception as exc:  # noqa: BLE001 — collect all errors
             errors.append(f"{jf.name}: {exc}")
@@ -173,16 +186,22 @@ def compare_pi_to_source(
     source_records: dict[str, dict[str, Any]] = {}
     missing_source_ids: list[str] = []
 
+    source_record_paths: dict[str, Path] = {}
+
     def _load_source(src_dir: Path) -> None:
-        for jf in sorted(src_dir.glob("*.json")):
-            if jf.name in _SKIP_FILENAMES:
-                continue
+        for jf in _result_json_files(src_dir):
             try:
                 rec = json.loads(jf.read_text(encoding="utf-8"))
                 rid = rec.get("id", jf.stem)
-                source_records[rid] = rec
             except Exception:  # noqa: BLE001 — skip unreadable
-                pass
+                continue
+            previous_path = source_record_paths.get(rid)
+            if previous_path is not None:
+                raise ValueError(
+                    f"Duplicate source record ID {rid!r}: {previous_path} and {jf}"
+                )
+            source_records[rid] = rec
+            source_record_paths[rid] = jf
 
     if source_nonchain_dir and source_nonchain_dir.exists():
         _load_source(source_nonchain_dir)
@@ -315,11 +334,15 @@ def main() -> None:
     source_nonchain = Path(args.source_nonchain) if args.source_nonchain else None
     source_chain = Path(args.source_chain) if args.source_chain else None
 
-    result = compare_pi_to_source(
-        records,
-        source_nonchain_dir=source_nonchain,
-        source_chain_dir=source_chain,
-    )
+    try:
+        result = compare_pi_to_source(
+            records,
+            source_nonchain_dir=source_nonchain,
+            source_chain_dir=source_chain,
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)
 
     md = render_comparison_md(result)
     out_path = Path(args.out)
