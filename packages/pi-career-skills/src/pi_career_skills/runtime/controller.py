@@ -74,6 +74,7 @@ class RunRequest:
     needed_skills: tuple[str, ...] | None = None
     budget: BudgetLimits | None = None
     seed_artifacts: list[Any] | None = None
+    private_context: dict[str, Any] | None = None
 
 
 @dataclass
@@ -88,6 +89,7 @@ class RunResult:
     attempt_count: int
     completed_skills: list[str]
     refs: list[dict[str, str]]
+    artifacts: list[dict[str, Any]]
     events: list[RunEvent]
     budget: BudgetConsumed
 
@@ -196,6 +198,7 @@ class CareerRunController:
 
             # Build per-skill runners for delegation.
             runners: dict[str, DelegationRunner] = {}
+            private_ctx = dict(request.private_context or {})
             for skill in allowed_skills:
                 runners[skill] = self._make_runner_for_skill(
                     skill=skill,
@@ -208,6 +211,7 @@ class CareerRunController:
                     allowed_skills=allowed_skills,
                     attempt_id=attempt_id,
                     halt_box=halt_box,
+                    private_context=private_ctx,
                 )
 
             # Build fresh supervisor via the factory.
@@ -359,6 +363,7 @@ class CareerRunController:
             attempt_count=0,
             completed_skills=[],
             refs=[],
+            artifacts=[],
             events=[],
             budget=BudgetConsumed(),
         )
@@ -372,17 +377,44 @@ class CareerRunController:
 
         We go through add_observation by constructing a synthetic succeeded
         observation.  This ensures dedup and quality gates apply normally.
+
+        The output shape is per-type so ``_extract_candidates`` promotes
+        exactly the right number of artifacts — no spurious shells.
         """
         from ..contracts import ToolObservation
 
-        obs = ToolObservation(
-            tool_name=self._tool_for_artifact_type(artifact.artifact_type),
-            status="succeeded",
-            output={
+        content = artifact.content or {}
+        atype = artifact.artifact_type
+
+        if atype == "structured_job_details":
+            # Real extract output is a batch with ``details`` list; each detail
+            # carries its own source_url / content_hash / candidates.  We
+            # build the same shape so ``_extract_candidates`` promotes each
+            # detail as one structured_job_details artifact.
+            candidates = content.get("candidates") or content.get("details") or []
+            detail: dict[str, Any] = {
                 "source_url": artifact.source_url or "",
                 "content_hash": artifact.content_hash or "",
-                **(artifact.content or {}),
-            },
+                "source_quality": artifact.quality or "jd_complete",
+                "candidates": candidates,
+            }
+            output: dict[str, Any] = {"details": [detail]}
+        else:
+            # public_job_page, job_matching_report, resume_tailoring_brief,
+            # job_search_results — top-level source_url + content_hash plus
+            # spread content is the correct shape.
+            output = {
+                "source_url": artifact.source_url or "",
+                "content_hash": artifact.content_hash or "",
+            }
+            if artifact.quality:
+                output["quality"] = artifact.quality
+            output.update(content)
+
+        obs = ToolObservation(
+            tool_name=self._tool_for_artifact_type(atype),
+            status="succeeded",
+            output=output,
         )
         store.add_observation(obs)
 
@@ -413,6 +445,7 @@ class CareerRunController:
         allowed_skills: tuple[str, ...],
         attempt_id: str,
         halt_box: list[tuple[str, str] | None],
+        private_context: dict[str, Any] | None = None,
     ) -> DelegationRunner:
         """Build a sync DelegationRunner bound to one specific skill.
 
@@ -420,6 +453,7 @@ class CareerRunController:
         so it must be a sync callable.  It uses ``asyncio.run`` internally to
         drive the skill agent loop.
         """
+        captured_private = dict(private_context or {})
 
         def runner(task_goal: str, params: dict[str, Any]) -> DelegationOutcome:
             return asyncio.run(
@@ -436,6 +470,7 @@ class CareerRunController:
                     allowed_skills=allowed_skills,
                     attempt_id=attempt_id,
                     halt_box=halt_box,
+                    private_context=captured_private,
                 )
             )
 
@@ -460,6 +495,7 @@ class CareerRunController:
         allowed_skills: tuple[str, ...],
         attempt_id: str,
         halt_box: list[tuple[str, str] | None],
+        private_context: dict[str, Any] | None = None,
     ) -> DelegationOutcome:
         """Run one skill delegation — the real skill agent loop."""
         del params
@@ -493,6 +529,7 @@ class CareerRunController:
             run_id=state.run_id,
             attempt_id=attempt_id,
             skill_name=skill,
+            metadata=dict(private_context or {}),
         )
         skill_agent = build_skill_agent(
             skill,
@@ -652,6 +689,7 @@ class CareerRunController:
             attempt_count=attempt_count,
             completed_skills=sorted(state.completed_skills),
             refs=store.refs(),
+            artifacts=_serialize_artifacts(store),
             events=event_log.events(),
             budget=tracker.consumed(),
         )
@@ -673,6 +711,29 @@ def _default_get_api_key(provider: str) -> str | None:
     if env_var:
         return os.environ.get(env_var)
     return None
+
+
+def _serialize_artifacts(store: EvidenceStore) -> list[dict[str, Any]]:
+    """Serialize all evidence-store artifacts into plain dicts (with content).
+
+    Used by the evaluation chain runner to seed the next link's evidence
+    store.  Each dict includes artifact_id, artifact_type, source_url,
+    content_hash, quality, and the full content_json (for chain projection
+    and seeding).
+    """
+    serialized: list[dict[str, Any]] = []
+    for art in store.job_bearing_artifacts():
+        serialized.append(
+            {
+                "artifact_id": art.artifact_id,
+                "artifact_type": art.artifact_type,
+                "source_url": art.source_url,
+                "content_hash": art.content_hash,
+                "quality": art.quality or None,
+                "content_json": dict(art.content) if art.content else {},
+            }
+        )
+    return serialized
 
 
 def _skill_has_evidence(skill: str, store: EvidenceStore) -> bool:

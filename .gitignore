@@ -49,3 +49,6 @@ Thumbs.db
 
 # SDD workspace (git-ignored scratch)
 .superpowers/
+
+# Local Claude Code settings (may contain API tokens)
+.claude/
