@@ -1,119 +1,43 @@
-# browse.py Modes Reference
+# 当前项目的公开页面抓取模式
 
-Load this document on demand when you need the **full reference for `scripts/browse.py`
-modes** (what each mode does, when to use which, search-strategy options, output format).
-For the single-URL extraction *workflow* (planner -> executor -> verifier), see
-`single-url-extraction.md` instead.
+本项目没有 `scripts/browse.py --mode ...` CLI。页面抓取由注册工具调用：
 
-Run `scripts/browse.py` with the appropriate mode:
+- `fetch-public-job-page`：抓取一个公开 URL。
+- `fetch-public-job-pages`：一次抓取 1～10 个 URL，并返回 `pages` 与逐 URL `failures`。
+- `search-public-job-pages`：在公开搜索源中发现招聘详情 URL；它不是招聘站内搜索框自动化。
+- `classify-job-url`：用低预算探针判定 `wechat/adapter/static/spa/blocked`。
 
-```bash
-python scripts/browse.py "<url>" \
-  --mode list|detail|interact|search|search-interact|parallel-fetch|click \
-  --out output/evidence \
-  --max-pages 5 \
-  --wait 3000
-```
+## 单页与列表页
 
-**Modes:**
-- `list` - For listing/search pages where JDs are visible inline. Waits for render,
-  scrolls to load lazy content, detects pagination, and collects text from all visible
-  content across up to `--max-pages` pages. **Best for**: static sites, simple career pages.
-- `detail` - For single job detail pages. Opens the URL, waits for render, returns
-  the full `body.innerText`.
-- `interact` - For sites where JDs are hidden behind click interactions (Moka, some SPAs).
-  Expands category/section headers, then uses JS-based element discovery to find and
-  click job cards one by one. Captures expanded text from each. **Note**: This mode
-  has a 2-minute time budget and works best when cards reveal content inline (rather
-  than in pure-SPA drawers).
-- `search` - **Search-first mode**. Finds a search box on the page, enters keywords,
-  then browses only the filtered results (with pagination). Falls back to full `list`
-  mode if search is unavailable or produces zero results (with `--fallback full`).
-  **Best for**: high-page-count career sites (Moka, zhiye.com, Feishu) where you want
-  to narrow down results before extracting.
-- `search-interact` - **Optimal mode for Moka/zhiye.com/Feishu**. Combines `search` +
-  `interact`: first filters by keyword, then clicks through each filtered card to
-  capture expanded full JDs. Falls back to `search` mode if no clickable cards are
-  found, and to `list` mode if search itself is unavailable. This is the recommended
-  mode for most career platforms when `parallel-fetch` is not applicable.
-- `parallel-fetch` - **v1.6 default for URL-keyed paginated sites** (e.g. xiaomi
-  Mioffice, bytedance jobs.bytedance.com, mokahr). Detects URL-keyed pagination
-  (click next -> read URL -> click prev -> read URL -> diff query params to find the
-  page-number and page-size parameters), pre-computes ALL page URLs, then fetches
-  pages concurrently via a thread pool (Java-ThreadPoolExecutor analog) with a
-  per-worker persistent browser. **Auto-fallback**: `click` mode for load-more/opaque
-  pagination, `spa_shell_no_pagination` thin result for card-SPAs, `status=blocked`
-  for anti-bot walls. **Best for**: multi-page URL-keyed listings where you want to
-  cut the browse leg from ~300s serial to ~70s parallel. When `used_path` is not
-  `parallel`, retry once with `--mode search-interact`.
-- `click` - Agent-driven sequential click pagination (click next -> collect -> repeat).
-  Used as the `parallel-fetch` fallback for load-more sites.
+`fetch-public-job-page` 先走 `pi_career_skills.network.page_fetch` 的 SSRF 防护
+和 `requests` 快速路径；命中动态页面或允许的 fallback 条件时，才使用
+`pi_career_skills.network.playwright_worker`。输出包含：
 
-**Search mode keywords:**
+`artifact_id`、`source_url`、`content_hash`、`visible_text`、`quality` 和有限的
+`detail_links`。`quality` 只有以下值：
 
-```bash
-# Default keywords (broad coverage):
-python scripts/browse.py "<url>" --mode search-interact
+- `jd_complete`：正文足以进入 JD 提取。
+- `list_only`：列表/卡片壳；应从 `detail_links` 选择详情页继续抓取。
+- `js_shell`：动态页面没有捕获到可用正文。
+- `empty`：空正文。
 
-# Custom keywords for specific roles:
-python scripts/browse.py "<url>" --mode search-interact \
-  --search-terms "AI,Agent,大模型,LLM,人工智能,深度学习"
+`fetch-public-job-pages` 在 `batch_fetch.py` 中会对符合条件的同站岗位详情链接
+做有界展开；它不是原项目 `parallel-fetch` 的 URL 分页探测器，也不会无限翻页。
 
-# Strategy: first_match (stop at first keyword with results - fastest)
-python scripts/browse.py "<url>" --mode search-interact \
-  --search-strategy first_match
+## 当前没有迁移的旧模式
 
-# Strategy: each (try all keywords, merge & deduplicate - most thorough)
-python scripts/browse.py "<url>" --mode search-interact \
-  --search-strategy each
+以下名称只属于原项目脚本，不能在本 agent 中调用：
 
-# Strategy: broad (use only the first keyword - e.g. a wide term like "AI")
-python scripts/browse.py "<url>" --mode search-interact \
-  --search-strategy broad \
-  --search-terms "AI"
+`interact`、`search-interact`、`click`、以及基于浏览器点击探测 URL 分页的
+`parallel-fetch`。当前 Playwright fallback 只负责渲染、稳定等待和收集同站详情链接，
+不负责通用的卡片点击或登录操作。
 
-# No fallback - fail explicitly if search unavailable:
-python scripts/browse.py "<url>" --mode search --fallback none
-```
+## 证据与失败处理
 
-**When to use which mode:**
+抓取成功后必须把返回的页面作为工具观察结果交给 EvidenceStore，再用
+`extract-observed-job-details` 或 `extract-observed-job-details-batch` 规范化。
+不要读取 `output/evidence/*.txt`，也不要把正文复制进下游 goal；跨 agent 只传
+`artifact_id`、`source_url`、`content_hash`。
 
-| Scenario | Mode | Why |
-|----------|------|-----|
-| URL-keyed multi-page listing (xiaomi/bytedance/mokahr) | `parallel-fetch` | Pre-compute page URLs, fetch concurrently -> ~70s instead of ~300s serial |
-| Moka, 50+ page listings | `search-interact` | Search -> filter to 1-2 pages -> click each card -> full JDs |
-| Moka, small site (< 10 pages) | `interact` | Skip search overhead, just click-through |
-| zhiye.com, many pages | `search-interact` | Search box usually available |
-| Feishu, many pages | `search-interact` | Search box sometimes available; auto-fallback if not |
-| WeChat article | `detail` -> OCR pipeline | No search box; static content |
-| Custom SPA without search | `interact` or `list` | No search box available |
-| Single detail page | `detail` | One page, no search needed |
-
-**What it does:**
-1. Launches headless Chromium
-2. Navigates to the URL, waits for `networkidle`
-3. Dismisses common consent/GDPR dialogs automatically
-4. Scrolls to trigger lazy-loaded content
-5. In `list` mode: finds "next page" buttons and paginates (up to `--max-pages`)
-6. Saves: `output/evidence/<content_hash>.txt` (full page text) and `.png` (screenshot)
-7. Outputs a JSON result to stdout with status, text preview, and content hash
-
-**Output format (stdout):**
-```json
-{
-  "status": "ok",
-  "url": "https://...",
-  "title": "Page title",
-  "content_hash": "sha256_abc123...",
-  "text_path": "output/evidence/sha256_abc123.txt",
-  "screenshot_path": "output/evidence/sha256_abc123.png",
-  "job_count_estimate": 42,
-  "pagination": {"current": 1, "total": 3, "has_more": true}
-}
-```
-
-If `status` is `"blocked"` or `"error"`, skip to the next URL and record the reason.
-
-**Content-addressed caching:** The text file path is derived from `sha256(page_text)`.
-If the file already exists, `browse.py` skips the browser and returns the cached path
-immediately. This means re-running on the same URL costs nothing.
+`js_shell`、`empty`、验证码、登录墙、403/429 和反爬挑战必须保留失败原因。
+不能把列表壳或失败页当作完整 JD，也不能自动破解验证或绕过访问控制。

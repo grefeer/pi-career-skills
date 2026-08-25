@@ -1,5 +1,14 @@
 # Notes: pi-py Career Agent Migration Continuation
 
+## Focused 10-question remediation (2026-08-25)
+
+- Baseline: 10 `waiting_user` records from `eval_results/full_25_parallel_20260825_0950`; 2 anti-bot, 4 budget exhausted, 2 no-progress, 2 auto-recovery-limit.
+- High-signal patterns: `route_already_consumed` repeats across Q034/Q046/Q148/R024/R025/R043; Q040 repeats resume-tailoring after role/source mismatch; R001 repeats sheet queries after invalid input; Q144 receives anti-bot but still has no source fallback.
+- Planned fix boundary: stop repeated route/recovery when no new artifact was produced in the attempt; short-circuit permanent public-source failures; preserve partial refs/summary; add regression tests before the 10-question rerun.
+- Primary rerun result: 2/10 runtime successes (Q034, R001), 8/10 waiting-user; tool calls fell from 594 to 201. Q144 runtime success had an audit failure caused by a transient candidate target ID; the resume-tailoring adapter now prefers the durable raw-page artifact for canonicalization. A follow-up Q144 live probe stopped at route exhaustion before producing a tailoring artifact, so the provenance fix is verified by tests but not by that live probe.
+- Regression rerun `eval_results/waiting10_regression_20260825_105141`: Q034 and R001 remained `succeeded` with `audit.status=passed`; Q144 was not a valid prior success because its first run audit failed, and its second run stopped before a tailoring artifact was produced.
+- Atomic-contract run `eval_results/waiting10_atomic_20260825_110456`: Q034 and R001 again remained `succeeded` with `audit.status=passed` and lower calls (27→15, 43→24). R025 became a higher-call `no_progress` handoff; investigate as a stochastic route variance before tightening batch visibility.
+
 ## Phase 9 evaluation continuation (2026-08-24)
 
 - Existing user-owned result evidence is in `eval_results/`; do not delete or overwrite it during investigation.

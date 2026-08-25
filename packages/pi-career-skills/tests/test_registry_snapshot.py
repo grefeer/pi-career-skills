@@ -24,10 +24,10 @@ _FIXTURES = Path(__file__).parent / "fixtures"
 _SNAPSHOT = json.loads((_FIXTURES / "pi_contract_snapshot.json").read_text("utf-8"))
 
 EXPECTED_SKILL_COUNTS = {
-    "job-discovery": 10,
-    "job-matching": 1,
-    "resume-tailoring": 1,
-    "career-planning": 1,
+    "job-discovery": 11,
+    "job-matching": 2,
+    "resume-tailoring": 2,
+    "career-planning": 2,
 }
 EXPECTED_DELIVERABLE_COUNTS = {
     "job-discovery": 7,  # fetch-pages/page/wechat/search/sheets/extract/extract-batch
@@ -54,7 +54,9 @@ def test_snapshot_metadata() -> None:
 
 
 def test_registry_has_exactly_the_snapshot_tool_names(registry: object) -> None:
-    assert set(registry.tool_names()) == set(_snapshot_tools())
+    assert set(registry.tool_names()) == set(_snapshot_tools()) | {
+        "read-skill-reference"
+    }
 
 
 def test_tool_catalog_by_skill_counts(registry: object) -> None:
@@ -105,3 +107,17 @@ def test_all_deliverables_have_artifact_type(registry: object) -> None:
         if definition and definition.is_deliverable:
             assert definition.artifact_type is not None, f"{name} missing artifact_type"
             assert name in TOOL_ARTIFACT_TYPE
+
+
+def test_compound_tools_expose_atomicity_contract(registry: object) -> None:
+    """Batch implementations remain available but advertise their boundary."""
+    batch = registry.get("fetch-public-job-pages")
+    extract_batch = registry.get("extract-observed-job-details-batch")
+    single = registry.get("fetch-public-job-page")
+
+    assert batch.contract.granularity == "batch"
+    assert batch.contract.preferred_for_agent is False
+    assert batch.contract.fallback_route == "fetch-public-job-page"
+    assert extract_batch.contract.granularity == "batch"
+    assert single.contract.granularity == "atomic"
+    assert "granularity=atomic" in single.agent_description

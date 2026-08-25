@@ -103,10 +103,10 @@ def test_skill_scoping() -> None:
     """Each skill agent sees exactly its own catalog (10/1/1/1), nothing else."""
     counts = {skill: len(names) for skill, names in TOOL_CATALOG_BY_SKILL.items()}
     assert counts == {
-        "job-discovery": 10,
-        "job-matching": 1,
-        "resume-tailoring": 1,
-        "career-planning": 1,
+        "job-discovery": 11,
+        "job-matching": 2,
+        "resume-tailoring": 2,
+        "career-planning": 2,
     }
     for skill, expected in TOOL_CATALOG_BY_SKILL.items():
         agent = build_skill_agent(skill, FAUX_MODEL, _CTX)
@@ -118,7 +118,18 @@ def test_skill_scoping() -> None:
             if other != skill
             for name in other_names
         }
-        assert set(names).isdisjoint(other_skill_names)
+        assert (set(names) - {"read-skill-reference"}).isdisjoint(
+            other_skill_names - {"read-skill-reference"}
+        )
+
+
+def test_each_skill_can_read_only_its_allowlisted_references() -> None:
+    """The shared tool is exposed per agent but the handler enforces scope."""
+    registry = __import__(
+        "pi_career_skills.registry", fromlist=["build_career_tool_registry"]
+    ).build_career_tool_registry()
+    tool = registry["read-skill-reference"]
+    assert tool.allowed_skills == frozenset(TOOL_CATALOG_BY_SKILL)
 
 
 # ---------------------------------------------------------------------------

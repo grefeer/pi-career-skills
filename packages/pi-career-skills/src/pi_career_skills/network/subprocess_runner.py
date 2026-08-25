@@ -10,8 +10,8 @@ tests deterministic.  ``_terminate_process_tree`` (source
 kill its own child process tree.
 
 In this package ``SKILL_DIR`` resolves under the pi package tree where no
-``skill/job-discovery`` directory exists -- ``run_skill_script`` then fails
-closed with ``ERROR: script not found ...`` instead of running anything.
+The package-local scripts live under ``resources/job_discovery_scripts`` and
+are shipped with the wheel; no source-repository path is required at runtime.
 """
 
 from __future__ import annotations
@@ -24,8 +24,8 @@ from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SKILL_DIR = _PROJECT_ROOT / "skill" / "job-discovery"
+_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+SKILL_DIR = _PACKAGE_ROOT / "resources" / "job_discovery_scripts"
 
 
 def quote_arg(value: str) -> str:
@@ -72,19 +72,7 @@ def split_cli_args(cli_args: str) -> list[str]:
     return tokens
 
 
-_ALLOWED_SCRIPTS = frozenset(
-    {
-        "browse",
-        "validate",
-        "normalize",
-        "deduplicate",
-        "ocr_image",
-        "state",
-        "read_evidence",
-        "write_candidates",
-        "coverage_gate",
-    }
-)
+_ALLOWED_SCRIPTS = frozenset({"ocr_image"})
 _SCRIPT_TIMEOUT_SEC = 900
 
 # runner: (script_path, parts, *, cwd, stdin, timeout) -> stdout text
@@ -139,7 +127,7 @@ def run_skill_script(
     """
     if script not in _ALLOWED_SCRIPTS:
         return f"ERROR: script not allowed: {script}"
-    script_path = SKILL_DIR / "scripts" / f"{script}.py"
+    script_path = SKILL_DIR / f"{script}.py"
     if not script_path.exists():
         return f"ERROR: script not found at {script_path}"
     try:

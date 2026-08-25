@@ -82,6 +82,7 @@ def load_archived_skill_prompt(skill_name: str, curated_prompt: str) -> str:
 ## Runtime adaptation (pi-career-skills)
 
 - Use only these registered tools: {', '.join(definition.tool_names)}.
+- `read-skill-reference` is the only allowed reference reader. Pass a relative `references/<file>.md` path from this skill's archived reference allowlist; never request `SKILL.md`, another skill's references, or arbitrary package files.
 - Treat `artifact_id`, `source_url`, and `content_hash` as the only cross-agent evidence handles; never paste business-fact copies into delegation goals.
 - Return the structured deliverable `{', '.join(sorted(definition.returns))}` through the registered tool before claiming success.
 - Do not call tools outside this capability, perform external side effects, or invent missing facts. If blocked, report the precise status and evidence needed.

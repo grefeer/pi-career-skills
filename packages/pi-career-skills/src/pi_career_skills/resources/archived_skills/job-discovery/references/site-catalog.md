@@ -159,3 +159,9 @@ When you encounter a site not in this catalog:
    - Full JDs visible in `browse.py` text → extract directly
    - Only summaries visible → need to click into detail pages
    - Blocked / login wall → skip, mark for manual review
+# Site classification in pi-career-skills
+
+> This catalog is decision guidance, not a `browse.py` command list. The
+> executable classifier is `network.classify_url.classify_job_url`; fetching is
+> performed by `fetch-public-job-page(s)` with requests/Playwright fallback.
+> Do not invoke the historical CLI examples below.

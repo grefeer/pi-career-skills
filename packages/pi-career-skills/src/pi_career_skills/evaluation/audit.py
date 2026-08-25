@@ -577,6 +577,17 @@ def _audit_tailoring(
                 target_found = True
                 break
         if not target_found:
+            # Candidate selectors can be transient even when the brief keeps
+            # a verifiable source URL. Accept only a unique persisted page
+            # with the same URL; an arbitrary unresolved ID remains invalid.
+            brief_url = content.get("source_url")
+            matching_urls = {
+                url
+                for (_aid, url, _h) in ref_index
+                if isinstance(url, str) and url and url == brief_url
+            }
+            target_found = len(matching_urls) == 1
+        if not target_found:
             return {
                 "status": "failed",
                 "reason": "tailoring_target_unresolved",

@@ -42,6 +42,8 @@ TARGET_EVIDENCE_NOT_FOUND: Final[str] = "target_evidence_not_found"
 TARGET_ROLE_MISMATCH: Final[str] = "target_role_mismatch"
 TARGET_SOURCE_MISMATCH: Final[str] = "target_source_mismatch"
 TOOL_EXECUTION_FAILED: Final[str] = "tool_execution_failed"
+SKILL_REFERENCE_NOT_ALLOWED: Final[str] = "skill_reference_not_allowed"
+SKILL_REFERENCE_NOT_FOUND: Final[str] = "skill_reference_not_found"
 TOOL_SKILL_FORBIDDEN: Final[str] = "tool_skill_forbidden"
 UNSAFE_PUBLIC_URL: Final[str] = "unsafe_public_url"
 UNKNOWN_TOOL: Final[str] = "unknown_tool"
@@ -158,6 +160,8 @@ __all__ = [
     "TARGET_ROLE_MISMATCH",
     "TARGET_SOURCE_MISMATCH",
     "TOOL_EXECUTION_FAILED",
+    "SKILL_REFERENCE_NOT_ALLOWED",
+    "SKILL_REFERENCE_NOT_FOUND",
     "TOOL_SKILL_FORBIDDEN",
     "UNSAFE_PUBLIC_URL",
     "UNKNOWN_TOOL",

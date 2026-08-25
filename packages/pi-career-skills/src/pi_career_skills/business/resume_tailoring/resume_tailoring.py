@@ -99,7 +99,9 @@ def build_resume_tailoring_brief(
     # The model may select an ``observed:<hash>`` or candidate alias.  Keep
     # that selector only as an input concern; persisted deliverables must
     # point at the canonical artifact id for provenance and auditability.
-    canonical_target_id = target.get("artifact_id")
+    canonical_target_id = _raw_artifact_id_for_source(
+        context.metadata.get("observed_public_evidence"), source_url
+    ) or target.get("artifact_id")
     if not isinstance(canonical_target_id, str) or not canonical_target_id.strip():
         canonical_target_id = payload.target_artifact_id
     required_keywords = [
@@ -169,6 +171,34 @@ def _find_target(raw_evidence: object, artifact_id: str) -> dict[str, Any] | Non
         if isinstance(item, dict) and item.get("artifact_id") == artifact_id:
             return item
     return None
+
+
+def _raw_artifact_id_for_source(raw_evidence: object, source_url: str) -> str | None:
+    """Return the durable page artifact for a candidate's source URL."""
+    if not isinstance(raw_evidence, list):
+        return None
+    wanted = _normalized_url(source_url)
+    for item in raw_evidence:
+        if not isinstance(item, dict):
+            continue
+        artifact_id = item.get("artifact_id")
+        if (
+            isinstance(artifact_id, str)
+            and artifact_id.strip()
+            and _normalized_url(item.get("source_url")) == wanted
+        ):
+            return artifact_id
+    return None
+
+
+def _normalized_url(value: object) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    parsed = urlsplit(value.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return value.strip()
+    path = parsed.path.rstrip("/") or "/"
+    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}{path}?{parsed.query}".rstrip("?")
 
 
 def _available_refs(context: ToolContext) -> str:

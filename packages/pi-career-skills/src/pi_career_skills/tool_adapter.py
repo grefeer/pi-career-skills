@@ -84,7 +84,13 @@ def _is_skill_allowed(context: ToolContext, definition: ToolDefinition) -> bool:
     """
     return (
         context.skill_name is not None
-        and context.skill_name == definition.skill_name
+        and (
+            context.skill_name == definition.skill_name
+            or (
+                definition.allowed_skills is not None
+                and context.skill_name in definition.allowed_skills
+            )
+        )
     )
 
 
@@ -267,7 +273,10 @@ class _RegisteredAgentTool:
         self._definition = definition
         self._context = context
         self.name = definition.name
-        self.description = definition.description
+        # Include the structured atomicity contract in the model-visible
+        # schema without changing the canonical registry description used by
+        # compatibility snapshots.
+        self.description = definition.agent_description
         self.parameters = definition.input_model.model_json_schema()
         self.label = definition.name
         self.execution_mode: ToolExecutionMode | None = "sequential"

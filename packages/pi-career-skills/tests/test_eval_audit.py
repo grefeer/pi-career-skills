@@ -394,6 +394,26 @@ def test_tailoring_fail_unresolvable_target() -> None:
     assert result["checks"]["tailoring"]["reason"] == "tailoring_target_unresolved"
 
 
+def test_tailoring_accepts_unique_source_url_for_transient_candidate_id() -> None:
+    jd = _jd_artifact("jd1")
+    brief = {
+        "artifact_id": "b1",
+        "artifact_type": "resume_tailoring_brief",
+        "content_json": {
+            "target_artifact_id": "candidate-transient",
+            "source_url": jd["source_url"],
+            "safe_actions": [{"fact_ref": "skills", "suggestion": "highlight Vue"}],
+        },
+    }
+
+    result = audit_record(
+        _base_record(artifacts=[jd, brief]),
+        confirmed_facts={"skills": ["Vue"]},
+    )
+
+    assert result["checks"]["tailoring"]["status"] == "passed"
+
+
 def test_tailoring_inconclusive_no_brief() -> None:
     rec = _base_record(artifacts=[])
     result = audit_record(rec, confirmed_facts={})

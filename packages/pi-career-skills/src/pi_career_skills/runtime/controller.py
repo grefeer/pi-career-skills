@@ -232,6 +232,7 @@ class CareerRunController:
             halt_box: list[tuple[str, str] | None] = [None]
 
             attempt_count += 1
+            attempt_artifact_count = len(store.job_bearing_artifacts())
             event_log.append(
                 "attempt_started",
                 {"attempt_index": attempt_count - 1},
@@ -381,6 +382,41 @@ class CareerRunController:
                     budget_limits.auto_recoveries,
                 )
             ):
+                # Recovery must change the evidence state or the route.  A
+                # fresh model attempt with the same evidence only repeats the
+                # failure (the observed Q034/Q040/Q046/Q148/R024/R025/R043
+                # pattern).  Keep the trusted partial artifacts and hand off
+                # instead of spending another full supervisor attempt.
+                attempt_added_artifacts = (
+                    len(store.job_bearing_artifacts()) - attempt_artifact_count
+                )
+                if (
+                    attempt_added_artifacts <= 0
+                    and outcome_code
+                    in {
+                        "no_progress",
+                        "route_already_consumed",
+                        "target_evidence_not_found",
+                        "target_role_mismatch",
+                        "target_source_mismatch",
+                        "budget_exhausted",
+                    }
+                ):
+                    if store.job_bearing_artifacts() and not state.summary:
+                        state.summary = (
+                            f"已保留 {len(store.job_bearing_artifacts())} 条持久化证据；"
+                            f"本轮因 {outcome_code} 未继续重复尝试。"
+                        )
+                    return self._finalize(
+                        state=state,
+                        store=store,
+                        tracker=tracker,
+                        event_log=event_log,
+                        status="waiting_user",
+                        error_code=outcome_code,
+                        error_message=outcome_msg,
+                        attempt_count=attempt_count,
+                    )
                 try:
                     tracker.record_recovery()
                     run_accumulator.auto_recoveries = (

@@ -10,7 +10,7 @@ The registry is the single source of truth for:
 
 * tool identity (``name`` / ``skill_name`` / ``is_deliverable``),
 * the persisted artifact type per deliverable tool (``TOOL_ARTIFACT_TYPE``),
-* the per-skill catalog (``TOOL_CATALOG_BY_SKILL`` — 10 / 1 / 1 / 1),
+* the per-skill catalog (``TOOL_CATALOG_BY_SKILL`` — 11 / 2 / 2 / 2),
 * the deterministic invoke entry (``CareerToolRegistry.invoke``) used by
   the trusted kernel (matching fallback, controller orchestration).
 
@@ -70,6 +70,12 @@ from .business.resume_tailoring.resume_tailoring import (
     ResumeTailoringBriefOutput,
     build_resume_tailoring_brief,
 )
+from .business.skill_references import (
+    READ_REFERENCE_SKILLS,
+    ReadSkillReferenceInput,
+    ReadSkillReferenceOutput,
+    read_skill_reference,
+)
 from .context import ToolContext
 from .network import handlers as network_handlers
 
@@ -88,6 +94,73 @@ TOOL_ARTIFACT_TYPE: dict[str, str] = {
     "match-observed-jobs": "job_matching_report",
     "build-resume-tailoring-brief": "resume_tailoring_brief",
     "build-preparation-plan": "career_preparation_plan",
+}
+
+
+@dataclass(frozen=True)
+class ToolContract:
+    """Model-facing execution contract used for atomic tool orchestration."""
+
+    granularity: str = "atomic"
+    side_effects: frozenset[str] = frozenset()
+    idempotent: bool = True
+    max_items: int | None = None
+    fallback_route: str | None = None
+    preferred_for_agent: bool = True
+
+
+# Keep batch/compound implementations available to the skill runtime, while
+# making their orchestration cost explicit to the model.  The business handler
+# remains unchanged; this is a contract layer, not a second tool registry.
+TOOL_CONTRACTS: dict[str, ToolContract] = {
+    "fetch-public-job-pages": ToolContract(
+        granularity="batch",
+        side_effects=frozenset({"network", "write_run_artifact"}),
+        idempotent=True,
+        max_items=10,
+        fallback_route="fetch-public-job-page",
+        preferred_for_agent=False,
+    ),
+    "extract-observed-job-details-batch": ToolContract(
+        granularity="batch",
+        side_effects=frozenset({"write_run_artifact"}),
+        max_items=10,
+        fallback_route="extract-observed-job-details",
+        preferred_for_agent=False,
+    ),
+    "fetch-wechat-article": ToolContract(
+        granularity="composite",
+        side_effects=frozenset({"network", "ocr", "write_run_artifact"}),
+        max_items=1,
+        fallback_route="fetch-public-job-page",
+    ),
+    "search-public-job-pages": ToolContract(
+        granularity="source_query",
+        side_effects=frozenset({"network", "write_run_artifact"}),
+        max_items=20,
+        fallback_route="query-career-sheet-records",
+    ),
+    "query-career-sheet-records": ToolContract(
+        granularity="source_query",
+        side_effects=frozenset({"remote_read", "write_run_artifact"}),
+        max_items=100,
+        fallback_route="search-public-job-pages",
+    ),
+    "match-observed-jobs": ToolContract(
+        granularity="deliverable",
+        side_effects=frozenset({"write_run_artifact"}),
+        max_items=100,
+    ),
+    "build-resume-tailoring-brief": ToolContract(
+        granularity="deliverable",
+        side_effects=frozenset({"write_run_artifact"}),
+        max_items=1,
+    ),
+    "build-preparation-plan": ToolContract(
+        granularity="deliverable",
+        side_effects=frozenset({"write_run_artifact"}),
+        max_items=1,
+    ),
 }
 
 
@@ -111,6 +184,33 @@ class ToolDefinition:
     allowed_roles: frozenset[str] = field(
         default_factory=lambda: frozenset({"executor"})
     )
+    # Shared infrastructure tools can be exposed to several skill agents
+    # while remaining a single registered model-facing tool name.
+    allowed_skills: frozenset[str] | None = None
+
+    @property
+    def contract(self) -> ToolContract:
+        """Return the explicit orchestration contract for this tool."""
+        return TOOL_CONTRACTS.get(
+            self.name,
+            ToolContract(
+                side_effects=frozenset({"write_run_artifact"})
+                if self.is_deliverable
+                else frozenset()
+            ),
+        )
+
+    @property
+    def agent_description(self) -> str:
+        """Description with bounded execution semantics for the model."""
+        contract = self.contract
+        route = f"; fallback={contract.fallback_route}" if contract.fallback_route else ""
+        preferred = "优先" if contract.preferred_for_agent else "仅在批量输入时"
+        return (
+            f"{self.description}\n"
+            f"工具契约：granularity={contract.granularity}; "
+            f"{preferred}使用; max_items={contract.max_items or '1'}{route}。"
+        )
 
 
 class CareerToolRegistry(Mapping[str, ToolDefinition]):
@@ -156,7 +256,9 @@ class CareerToolRegistry(Mapping[str, ToolDefinition]):
         """Return ``{skill_name: [tool names...]}`` in registration order."""
         catalog: dict[str, list[str]] = {}
         for definition in self._tools.values():
-            catalog.setdefault(definition.skill_name, []).append(definition.name)
+            skills = definition.allowed_skills or frozenset({definition.skill_name})
+            for skill_name in sorted(skills):
+                catalog.setdefault(skill_name, []).append(definition.name)
         return catalog
 
     # -- trusted-kernel invoke ----------------------------------------------
@@ -188,13 +290,27 @@ class CareerToolRegistry(Mapping[str, ToolDefinition]):
 
 
 def build_career_tool_registry() -> CareerToolRegistry:
-    """Build the reviewed catalog: 13 tools across four skills.
+    """Build the reviewed catalog: 14 tools across four skills.
 
     Existing descriptions are verbatim from ``backend/app/services/
     career_skills/registry.py``; career-planning uses the approved archived
     Skill contract. Input/output models point at the ported pydantic models.
     """
     registry = CareerToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="read-skill-reference",
+            skill_name="skill-reference",
+            allowed_skills=READ_REFERENCE_SKILLS,
+            input_model=ReadSkillReferenceInput,
+            output_model=ReadSkillReferenceOutput,
+            handler=read_skill_reference,
+            description=(
+                "按当前 skill agent 的白名单读取 archived skill 的 references/*.md；"
+                "禁止跨 skill、路径穿越或读取 SKILL.md/任意包文件。"
+            ),
+        )
+    )
     registry.register(
         ToolDefinition(
             name="extract-observed-job-details-batch",
@@ -394,16 +510,18 @@ def build_career_tool_registry() -> CareerToolRegistry:
 
 
 #: Per-skill catalog — Phase 5 uses this to scope each subagent's tool grant.
-#: job-discovery 10 / job-matching 1 / resume-tailoring 1 / career-planning 1.
+#: job-discovery 11 / job-matching 2 / resume-tailoring 2 / career-planning 2.
 TOOL_CATALOG_BY_SKILL: dict[str, list[str]] = (
     build_career_tool_registry().catalog_by_skill()
 )
 
 
 __all__ = [
+    "ToolContract",
     "ToolDefinition",
     "CareerToolRegistry",
     "TOOL_ARTIFACT_TYPE",
+    "TOOL_CONTRACTS",
     "TOOL_CATALOG_BY_SKILL",
     "build_career_tool_registry",
 ]

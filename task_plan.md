@@ -37,7 +37,17 @@ Complete `docs/pi-py-agent迁移计划.md` through a verified 83-question pi-age
 - Fresh post-fix Q045 succeeded (`106.609s`, two `jd_complete` artifacts, passed audit), confirming the completion gate repair. Its event trace also shows repeated `extract-observed-job-details* → target_evidence_not_found` after artifacts were promoted; investigate this real evidence/context projection boundary before accepting a chain result that depends on structured candidates.
 
 ## Status
-**Currently at Phase 9 P0 compatibility checkpoint** — Q045 post-fix completion gate has passed. The in-run evidence projection and career-planning business adapter have focused GREEN tests; independent code review is pending before their runtime integration. Do not start Layer 3 until that integration is verified.
+**Currently in a focused 10-question failure-remediation pass** — the prior 25-question run produced 10 `waiting_user` records. This pass targets route repetition, no-progress recovery, partial-evidence preservation, and per-delegation stopping before rerunning the same 10 IDs.
+
+## Focused remediation phases
+- [ ] Phase A: reproduce the 10 waiting-user event patterns from persisted records
+- [x] Phase A: reproduce the 10 waiting-user event patterns from persisted records
+- [x] Phase B: implement bounded route/no-progress/recovery fixes with regression tests
+- [x] Phase C: run focused package verification and inspect changed diff
+- [x] Phase D: rerun C001, Q034, Q040, Q046, Q144, Q148, R001, R024, R025, R043
+- [x] Phase E: compare before/after trajectories and write the five-dimension review
+
+**Status:** Focused remediation and regression pass complete. The second 10-question run preserved both audit-passed successes (Q034 and R001); Q144 remains source-dependent and did not produce a valid tailoring artifact in the regression run.
 
 ## Implementation Tasks
 

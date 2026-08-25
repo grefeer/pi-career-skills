@@ -240,3 +240,9 @@ ls output/evidence/  # each file is sha256_<content_hash>.txt
 # List already-extracted candidates
 ls output/candidates/  # each file is sha256_<content_hash>.json
 ```
+# Incremental Evidence Persistence (pi-career-skills)
+
+> The original `output/state.json`, `browse.py`, `normalize.py`, and
+> `deduplicate.py` commands are not runtime interfaces here. Incremental state
+> is owned by `EvidenceStore` and the request governor. Use artifact references,
+> not filesystem paths: `artifact_id`, `source_url`, and `content_hash`.

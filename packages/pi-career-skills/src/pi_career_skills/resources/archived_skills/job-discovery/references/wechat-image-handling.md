@@ -1,5 +1,11 @@
 # WeChat Image-Heavy Article Handling
 
+> **Runtime mapping:** use the registered `fetch-wechat-article` tool. The
+> package invokes the bundled `resources/job_discovery_scripts/ocr_image.py`
+> through the restricted subprocess runner; do not call the historical
+> `scripts/ocr_image.py`, `browse.py`, `validate.py`, or `output/` paths directly.
+> OCR text remains bounded evidence and must retain its image `content_hash`.
+
 > **TL;DR**: If an article has images, ALWAYS try OCR. Some WeChat articles are a single
 > giant image with zero text. The decision tree below tells you exactly what to do at each
 > step — read only as far as your situation requires.

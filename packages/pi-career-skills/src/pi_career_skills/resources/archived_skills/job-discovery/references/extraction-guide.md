@@ -1,5 +1,11 @@
 # JD Extraction Guide
 
+> **pi-career-skills adaptation:** This document is guidance for the registered
+> `extract-observed-job-details(-batch)` tools. The old `scripts/*.py`,
+> `NormalizedJobCandidate`, and `output/` examples below are historical and are
+> not executable entry points in this package. Use the schemas in this package's
+> `business.job_discovery.models` and preserve `artifact_id`/`content_hash`.
+
 Best practices for extracting structured job descriptions from raw page text.
 Read this before Phase 4 (Structure) to avoid common pitfalls.
 

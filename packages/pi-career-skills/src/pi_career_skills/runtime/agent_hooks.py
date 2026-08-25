@@ -237,6 +237,15 @@ def build_controller_hooks(
                 external_failure_counts["blocked_public_source"] = (
                     external_failure_counts.get("blocked_public_source", 0) + 1
                 )
+                # A challenge/login/manual-review response is a terminal
+                # source hand-off for this route.  Retrying the same public
+                # source only increases blocking risk; the supervisor can
+                # still finish from any already-promoted deliverable.
+                _record_halt(
+                    error_code,
+                    f"{error_code}: public source requires manual review or a fallback source",
+                )
+                external_terminate = True
             if not succeeded and error_code in {
                 "route_already_consumed",
                 "wechat_ocr_disabled",
@@ -244,13 +253,10 @@ def build_controller_hooks(
                 external_failure_counts[error_code] = (
                     external_failure_counts.get(error_code, 0) + 1
                 )
-                if (
-                    external_failure_counts[error_code] >= 2
-                    and not store.job_bearing_artifacts()
-                ):
+                if external_failure_counts[error_code] >= 2:
                     _record_halt(
                         error_code,
-                        f"{error_code}: no usable public evidence remains",
+                        f"{error_code}: route exhausted without a productive next step",
                     )
                     external_terminate = True
                 elif (
@@ -267,6 +273,33 @@ def build_controller_hooks(
                         "public source requires manual review after anti-bot challenge",
                     )
                     external_terminate = True
+
+            # Repeated evidence/validation misses with no promotion indicate
+            # a deterministic mismatch, not a transient network failure.
+            if not succeeded and error_code in {
+                "target_evidence_not_found",
+                "target_role_mismatch",
+                "target_source_mismatch",
+                "empty_public_page",
+                "public_page_content_insufficient",
+                "invalid_tool_input",
+            }:
+                miss_key = f"miss:{error_code}"
+                external_failure_counts[miss_key] = (
+                    external_failure_counts.get(miss_key, 0) + 1
+                )
+                if external_failure_counts[miss_key] >= 3:
+                    _record_halt(
+                        "no_progress",
+                        f"{error_code}: repeated failure without new evidence",
+                    )
+                    external_terminate = True
+            elif produced:
+                # New evidence makes a subsequent validation miss meaningful
+                # again; do not carry stale failure streaks across progress.
+                for key in tuple(external_failure_counts):
+                    if key.startswith("miss:"):
+                        external_failure_counts.pop(key, None)
 
             try:
                 signal = guard.note_call(

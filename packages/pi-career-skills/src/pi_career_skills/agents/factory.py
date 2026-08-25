@@ -18,7 +18,7 @@ from pi_agent_core import Agent, AgentOptions, AgentState
 from pi_ai import Model
 
 from ..context import ToolContext
-from ..registry import build_career_tool_registry
+from ..registry import CareerToolRegistry, build_career_tool_registry
 from ..tool_adapter import make_agent_tool
 from .capabilities import CAPABILITY_REGISTRY
 from .delegation_tools import DelegationRunner, make_delegation_tool
@@ -124,7 +124,21 @@ def build_skill_agent(
     if skill_name not in CAPABILITY_REGISTRY:
         raise ValueError(f"unknown skill: {skill_name}")
     reg = registry if registry is not None else _REGISTRY
-    tools = [make_agent_tool(reg[name], context) for name in CAPABILITY_REGISTRY[skill_name].tool_names]
+    # Hermetic test registries and downstream integrations may intentionally
+    # provide an older catalog.  Keep the capability contract authoritative,
+    # but omit definitions unavailable in that injected registry; the default
+    # production registry contains every current tool, including the shared
+    # read-skill-reference tool.
+    missing = [name for name in CAPABILITY_REGISTRY[skill_name].tool_names if reg.get(name) is None]
+    if missing and isinstance(reg, CareerToolRegistry):
+        raise RuntimeError(
+            f"production registry is missing tools for {skill_name}: {', '.join(missing)}"
+        )
+    tools = [
+        make_agent_tool(definition, context)
+        for name in CAPABILITY_REGISTRY[skill_name].tool_names
+        if (definition := reg.get(name)) is not None
+    ]
     return Agent(
         AgentOptions(
             initial_state=AgentState(
