@@ -223,6 +223,37 @@ class TestEvidenceStorePromotion:
         assert not _is_quality_job_bearing(arts[0])
         assert store.job_bearing_artifacts() == []
 
+    def test_preparation_plan_is_job_bearing_and_persisted(self):
+        store = EvidenceStore()
+        output = {
+            "target_artifact_id": "jd-1",
+            "resolved_target_artifact_id": "jd-1",
+            "selected_target_reference": "observed:" + ("b" * 64),
+            "source_url": "https://example.com/jobs/123",
+            "jd_topics": ["大模型"],
+            "actions": ["复习大模型基础"],
+            "schedule_assumption": "relative",
+            "schedule": {"kind": "relative", "relative_window": "本周"},
+            "plan_items": [
+                {
+                    "topic": "大模型",
+                    "priority": "P0",
+                    "time_budget_hours": 2,
+                    "relative_order": "first",
+                    "completion_criteria": "能解释核心概念",
+                    "review_checkpoint": "完成后自测",
+                    "evidence_basis": "JD 原文",
+                }
+            ],
+            "content_hash": "c" * 64,
+        }
+        arts = store.add_observation(
+            _make_obs("build-preparation-plan", output)
+        )
+        assert len(arts) == 1
+        assert arts[0].artifact_type == "career_preparation_plan"
+        assert store.job_bearing_artifacts() == arts
+
 
 class TestSearchShellFiltering:
     def test_empty_search_shell_not_promoted(self):

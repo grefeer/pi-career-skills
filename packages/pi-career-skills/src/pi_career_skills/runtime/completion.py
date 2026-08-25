@@ -185,6 +185,20 @@ def tailoring_completed(store: Any) -> bool:
         ``safe_actions``.
     """
     for artifact in store.job_bearing_artifacts():
+        if artifact.artifact_type == "job_matching_report":
+            content = artifact.content or {}
+            count = content.get("evaluated_candidate_count")
+            if (
+                content.get("no_match_reason")
+                == "no_candidate_satisfied_constraints"
+                and isinstance(count, int)
+                and not isinstance(count, bool)
+                and count >= 0
+            ):
+                # No target exists to tailor; the dependent skill is
+                # explicitly not applicable, which is a completed contract
+                # outcome rather than a missing deliverable.
+                return True
         if artifact.artifact_type != "resume_tailoring_brief":
             continue
         content = artifact.content or {}

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from pi_career_skills.business.job_matching.job_matching import (
     MatchObservedJobsInput,
+    _candidate_recency_verified,
     match_observed_jobs,
 )
 from pi_career_skills.context import ToolContext
@@ -134,6 +135,50 @@ def test_no_matching_keywords_sets_no_match_reason():
     assert result.evaluated_candidate_count == 1
     assert result.matches == []
     assert result.no_match_reason == "no_candidate_satisfied_constraints"
+
+
+def test_raw_jd_fallback_when_structured_seed_is_unrelated() -> None:
+    """A bad structured seed must not hide a valid persisted public JD."""
+    result = match_observed_jobs(
+        _ctx(
+            {
+                "task_goal": "AI Agent 开发工程师，应届生",
+                "structured_job_candidates": [
+                    {
+                        "candidate_id": "seed:candidate:0",
+                        "artifact_id": "seed",
+                        "source_url": "https://example.com/list",
+                        "title": "市场专员",
+                        "responsibilities": "品牌活动",
+                        "requirements": "市场经验",
+                    }
+                ],
+                "observed_public_evidence": [
+                    {
+                        "artifact_id": "jd1",
+                        "source_url": "https://example.com/jobs/agent",
+                        "title": "AI 应用开发工程师",
+                        "quality": "jd_complete",
+                        "visible_text": (
+                            "AI Agent 应用开发工程师，负责智能体应用开发，"
+                            "要求 Python、RAG，面向应届生。"
+                        ),
+                    }
+                ],
+            }
+        ),
+        MatchObservedJobsInput(profile_keywords=["python", "rag"]),
+    )
+    assert result.matches
+    assert result.matches[0].artifact_id == "jd1"
+
+
+def test_recency_reads_explicit_publication_date_from_visible_page_text():
+    """Static campus pages may carry the labelled date only in visible text."""
+    candidate = {
+        "visible_text": "岗位信息\n发布时间：2026-08-24\n职位描述：AI 应用开发",
+    }
+    assert _candidate_recency_verified(candidate, "最近7天")
 
 
 def test_matched_keywords_are_lowercased():

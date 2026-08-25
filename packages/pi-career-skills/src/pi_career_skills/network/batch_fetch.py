@@ -48,6 +48,15 @@ from .page_fetch import (
     _remember_blocked_domain,
 )
 from .page_links import _HtmlLinkCollector, _prioritize_detail_links
+from .request_governor import (
+    before_request as _govern_before_request,
+)
+from .request_governor import (
+    get_cached_page as _govern_get_cached_page,
+)
+from .request_governor import (
+    put_cached_page as _govern_put_cached_page,
+)
 from .url_guard import PublicFetchError, _assert_public_url
 from .wechat import _fetch_wechat_article_page
 
@@ -380,11 +389,17 @@ def _fetch_one_with_expansion(
     """
     _assert_public_url(url)
     _ensure_domain_available(context, url)
+    cached_page = _govern_get_cached_page(context, url)
+    if cached_page is not None:
+        return [cached_page]
+    _govern_before_request(context, url)
     wechat_page = _fetch_wechat_article_page(context, url)
     if wechat_page is not None:
+        _govern_put_cached_page(context, wechat_page)
         return [wechat_page]
     adapter_page = _fetch_via_adapter(url)
     if adapter_page is not None:
+        _govern_put_cached_page(context, adapter_page)
         return [adapter_page]
     try:
         page, raw_html = _fetch_public_page_requests_with_html(url)
@@ -396,6 +411,7 @@ def _fetch_one_with_expansion(
         ):
             raise
     else:
+        _govern_put_cached_page(context, page)
         collector = _HtmlLinkCollector(url)
         collector.feed(raw_html)
         tencent_links = _tencent_query_detail_urls(url, raw_html)
@@ -466,6 +482,7 @@ def _fetch_one_with_expansion(
             visible_text=rendered_text,
             status_code=rendered_status,
         )
+        _govern_put_cached_page(context, list_page)
     except PublicFetchError as error:
         _remember_blocked_domain(context, url, error)
         raise
@@ -567,9 +584,15 @@ def fetch_public_job_pages(
         if payload is None or not remaining:
             return FetchPublicJobPagesOutput(pages=[], failures=failures)
 
+    # Production runs deliberately serialize the batch.  Parallel requests
+    # to one recruiting host are a common, avoidable trigger for access
+    # controls; direct unit callers retain the historical bounded parallel
+    # runner unless the controller enables the governor.
+    workers = 1 if context.metadata.get("enforce_public_request_governor") else 4
     batch = run_parallel_with_progress(
         payload.urls,
         work,
+        workers=workers,
         label="url",
         key=lambda url: url,
     )

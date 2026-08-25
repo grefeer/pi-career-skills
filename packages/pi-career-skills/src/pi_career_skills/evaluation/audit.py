@@ -20,8 +20,8 @@ inventions per migration plan §12.1.
 
 from __future__ import annotations
 
-from datetime import date
 import re
+from datetime import date
 from typing import Any
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -57,6 +57,7 @@ _NAVIGATION_ONLY_TITLES: frozenset[str] = frozenset({
     "岗位列表",
     "首页",
     "招聘",
+    "招聘日历",
     "投递",
     "登录",
     "注册",
@@ -128,6 +129,12 @@ def _build_ref_index(
     index: set[tuple[str, str, str]] = set()
     for art in artifacts:
         index.add(_artifact_ref(art))
+        # Model-visible projections use ``observed:<content_hash>`` as a
+        # bounded selector.  It is an alias of the persisted canonical id,
+        # not a separate artifact, so audits must resolve both forms.
+        content_hash = art.get("content_hash")
+        if isinstance(content_hash, str) and content_hash:
+            index.add((f"observed:{content_hash}", "", content_hash))
     if inherited_refs:
         for ref in inherited_refs:
             if not isinstance(ref, dict):
@@ -137,6 +144,9 @@ def _build_ref_index(
                 str(ref.get("source_url", "") or ""),
                 str(ref.get("content_hash", "") or ""),
             ))
+            content_hash = ref.get("content_hash")
+            if isinstance(content_hash, str) and content_hash:
+                index.add((f"observed:{content_hash}", "", content_hash))
     return index
 
 
@@ -177,6 +187,9 @@ def _target_evidence_by_id(
         artifact_id = artifact.get("artifact_id")
         if isinstance(artifact_id, str) and artifact_id.strip():
             evidence.setdefault(artifact_id, artifact)
+            content_hash = artifact.get("content_hash")
+            if isinstance(content_hash, str) and content_hash.strip():
+                evidence.setdefault(f"observed:{content_hash}", artifact)
     return evidence
 
 
@@ -194,6 +207,7 @@ def _candidate_matches_reference(candidate: dict[str, Any], reference: str) -> b
             "source_artifact_id",
             "source_url",
             "page_source_url",
+            "apply_url",
         )
     )
 
@@ -251,11 +265,20 @@ def _is_valid_structured_candidate(
 ) -> bool:
     """Require a real role title, source provenance, and substantive JD body."""
     title = candidate.get("title")
-    candidate_url = candidate.get("page_source_url") or candidate.get("source_url")
+    # Structured extraction has two legitimate output shapes: candidates
+    # re-projected from page evidence carry source_url/page_source_url, while
+    # direct portal extraction may only preserve the apply_url.  All three
+    # are accepted only when they point to the containing artifact's source
+    # URL, so this remains provenance-bound rather than a permissive fallback.
+    candidate_urls = (
+        candidate.get("page_source_url"),
+        candidate.get("source_url"),
+        candidate.get("apply_url"),
+    )
     if not (
         _nonempty_string(title)
         and title.strip() not in _NAVIGATION_ONLY_TITLES
-        and candidate_url == source_url
+        and any(candidate_url == source_url for candidate_url in candidate_urls)
     ):
         return False
     return len(_candidate_text(candidate)) >= 20
@@ -450,7 +473,17 @@ def _audit_matching(
     for report in report_artifacts:
         content = report.get("content_json", {}) if isinstance(report.get("content_json"), dict) else {}
         matches = content.get("matches", [])
-        no_candidate = content.get("no_candidate_satisfied_constraints", False)
+        # The runtime schema uses ``no_match_reason``; older persisted
+        # reports used a boolean flag.  Both are explicit, evidence-bound
+        # negative results and must not be downgraded to inconclusive.
+        no_candidate = content.get("no_candidate_satisfied_constraints") is True
+        if (
+            content.get("no_match_reason") == "no_candidate_satisfied_constraints"
+            and isinstance(content.get("evaluated_candidate_count"), int)
+            and not isinstance(content.get("evaluated_candidate_count"), bool)
+            and content["evaluated_candidate_count"] >= 0
+        ):
+            no_candidate = True
         has_results = bool(matches) or bool(no_candidate)
         if not has_results:
             continue
@@ -506,6 +539,25 @@ def _audit_tailoring(
         a for a in artifacts if a.get("artifact_type") == "resume_tailoring_brief"
     ]
     if not brief_artifacts:
+        # Tailoring is explicitly not applicable when matching evaluated
+        # evidence and found no eligible candidate. Keep audit semantics in
+        # lockstep with runtime/completion.py instead of calling this missing.
+        for matching in artifacts:
+            if matching.get("artifact_type") != "job_matching_report":
+                continue
+            content = matching.get("content_json")
+            count = content.get("evaluated_candidate_count") if isinstance(content, dict) else None
+            if (
+                isinstance(content, dict)
+                and content.get("no_match_reason") == "no_candidate_satisfied_constraints"
+                and isinstance(count, int)
+                and not isinstance(count, bool)
+                and count >= 0
+            ):
+                return {
+                    "status": "passed",
+                    "reason": "tailoring_not_applicable_no_match",
+                }
         return {"status": "inconclusive", "reason": "no_tailoring_brief"}
 
     confirmed_keys = set(confirmed_facts.keys()) if confirmed_facts else set()
@@ -586,6 +638,37 @@ def _audit_planning(
             resolved_target_id = content.get("resolved_target_artifact_id")
             if not isinstance(target_id, str) or not target_id.strip():
                 failure = {"status": "failed", "reason": "planning_target_missing"}
+            elif target_id.startswith("role:"):
+                # Explicit role-level fallback: valid only when the output
+                # clearly declares user-goal provenance and does not pretend
+                # to be anchored to an employer JD.
+                items = content.get("plan_items")
+                role_basis = all(
+                    isinstance(item, dict)
+                    and str(item.get("evidence_basis", "")).startswith(
+                        "user-stated role/profile"
+                    )
+                    for item in items
+                ) if isinstance(items, list) and items else False
+                actions = content.get("actions")
+                source_url = content.get("source_url")
+                if (
+                    resolved_target_id == target_id
+                    and isinstance(source_url, str)
+                    and source_url.startswith("user_goal://role/")
+                    and plan.get("source_url") == source_url
+                    and isinstance(content.get("jd_topics"), list)
+                    and content["jd_topics"]
+                    and isinstance(actions, list)
+                    and bool(actions)
+                    and role_basis
+                ):
+                    failure = None
+                else:
+                    failure = {
+                        "status": "failed",
+                        "reason": "role_plan_provenance_invalid",
+                    }
             elif (
                 not isinstance(resolved_target_id, str)
                 or not resolved_target_id.strip()
@@ -629,6 +712,23 @@ def _audit_planning(
                                 "reason": "planning_selected_target_reference_missing",
                             }
                         else:
+                            # A chain may re-project the same persisted page
+                            # into a new artifact envelope.  The model can
+                            # therefore select an artifact_id from an
+                            # inherited link.  Accept that selector only when
+                            # the referenced artifact is itself indexed and
+                            # has the exact same source URL as the canonical
+                            # target; never accept an unrelated ID.
+                            if selected_reference not in _canonical_selector_aliases(target):
+                                same_url_artifact = any(
+                                    candidate_artifact.get("artifact_id")
+                                    == selected_reference
+                                    and candidate_artifact.get("source_url")
+                                    == target_url
+                                    for candidate_artifact in target_evidence.values()
+                                )
+                                if same_url_artifact:
+                                    selected_reference = target["artifact_id"]
                             jd_text, selector_error = _resolve_target_jd_text(
                                 target, selected_reference
                             )

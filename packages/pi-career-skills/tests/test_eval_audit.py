@@ -280,6 +280,23 @@ def test_matching_pass_no_candidate_flag() -> None:
     assert result["checks"]["matching"]["no_candidate_satisfied_constraints"] is True
 
 
+def test_matching_pass_explicit_no_match_reason() -> None:
+    """The current runtime schema records a bounded negative result by reason."""
+    match_report = {
+        "artifact_id": "m1",
+        "artifact_type": "job_matching_report",
+        "content_json": {
+            "matches": [],
+            "no_match_reason": "no_candidate_satisfied_constraints",
+            "evaluated_candidate_count": 1,
+            "input_refs": [],
+        },
+    }
+    result = audit_record(_base_record(artifacts=[match_report]))
+    assert result["checks"]["matching"]["status"] == "passed"
+    assert result["checks"]["matching"]["no_candidate_satisfied_constraints"] is True
+
+
 def test_matching_inconclusive_no_report() -> None:
     rec = _base_record(artifacts=[])
     result = audit_record(rec)
@@ -381,6 +398,47 @@ def test_tailoring_inconclusive_no_brief() -> None:
     rec = _base_record(artifacts=[])
     result = audit_record(rec, confirmed_facts={})
     assert result["checks"]["tailoring"]["status"] == "inconclusive"
+
+
+def test_tailoring_not_applicable_after_explicit_matching_no_match() -> None:
+    report = {
+        "artifact_id": "m-no-match",
+        "artifact_type": "job_matching_report",
+        "content_json": {
+            "matches": [],
+            "evaluated_candidate_count": 2,
+            "no_match_reason": "no_candidate_satisfied_constraints",
+        },
+    }
+    rec = _base_record(
+        artifacts=[report], meta={"skills": ["resume-tailoring"]}
+    )
+    result = audit_record(rec, confirmed_facts={})
+    assert result["checks"]["tailoring"] == {
+        "status": "passed",
+        "reason": "tailoring_not_applicable_no_match",
+    }
+
+
+def test_role_plan_audit_requires_envelope_source_match() -> None:
+    content = {
+        "target_artifact_id": "role:ai-agent",
+        "resolved_target_artifact_id": "role:ai-agent",
+        "source_url": "user_goal://role/ai-agent",
+        "jd_topics": ["python"],
+        "actions": ["准备案例"],
+        "plan_items": [{"evidence_basis": "user-stated role/profile (no employer JD available)"}],
+    }
+    mismatched = {
+        "artifact_id": "plan-1",
+        "artifact_type": "career_preparation_plan",
+        "source_url": "user_goal://role/other",
+        "content_json": content,
+    }
+    result = audit_record(
+        _base_record(artifacts=[mismatched], meta={"skills": ["career-planning"]})
+    )
+    assert result["checks"]["planning"]["reason"] == "role_plan_provenance_invalid"
 
 
 # ====================================================================
@@ -577,6 +635,75 @@ def test_planning_accepts_real_structured_candidate_selector() -> None:
 
     assert result["status"] == "passed"
     assert result["checks"]["planning"]["target_artifact_id"] == "structured-jd"
+
+
+def test_planning_accepts_same_url_artifact_id_from_inherited_link() -> None:
+    """Re-projected chain artifacts may have different IDs for one page URL."""
+    canonical = _jd_artifact(
+        artifact_id="canonical-page",
+        text="Full JD requires Python and RAG implementation experience.",
+    )
+    inherited_projection = _jd_artifact(
+        artifact_id="inherited-page",
+        text="Full JD requires Python and RAG implementation experience.",
+    )
+    plan = _planning_artifact(
+        target_artifact_id="canonical-page",
+        source_url=canonical["source_url"],
+    )
+    plan["content_json"]["selected_target_reference"] = "inherited-page"
+
+    result = audit_record(
+        _base_record(
+            artifacts=[canonical, inherited_projection, plan],
+            meta={"skills": ["career-planning"]},
+        )
+    )
+
+    assert result["status"] == "passed"
+
+
+def test_planning_accepts_apply_url_as_structured_candidate_provenance() -> None:
+    """Real extraction output may carry the page URL in apply_url only."""
+    structured = _structured_jd_artifact()
+    candidate = structured["content_json"]["candidates"][0]
+    candidate.pop("source_url")
+    candidate["apply_url"] = structured["source_url"]
+    plan = _planning_artifact(
+        target_artifact_id="structured-jd",
+        source_url=structured["source_url"],
+    )
+    plan["content_json"]["selected_target_reference"] = "candidate-1"
+
+    result = audit_record(
+        _base_record(
+            artifacts=[structured, plan], meta={"skills": ["career-planning"]}
+        )
+    )
+
+    assert result["status"] == "passed"
+
+
+def test_planning_accepts_matching_apply_url_when_other_candidate_urls_are_stale() -> None:
+    """A stale source_url must not hide a matching apply_url provenance."""
+    structured = _structured_jd_artifact()
+    candidate = structured["content_json"]["candidates"][0]
+    candidate["source_url"] = "https://stale.example.test/old"
+    candidate["page_source_url"] = "https://stale.example.test/old"
+    candidate["apply_url"] = structured["source_url"]
+    plan = _planning_artifact(
+        target_artifact_id="structured-jd",
+        source_url=structured["source_url"],
+    )
+    plan["content_json"]["selected_target_reference"] = "candidate-1"
+
+    result = audit_record(
+        _base_record(
+            artifacts=[structured, plan], meta={"skills": ["career-planning"]}
+        )
+    )
+
+    assert result["status"] == "passed"
 
 
 def test_planning_rejects_structured_target_without_a_valid_candidate() -> None:

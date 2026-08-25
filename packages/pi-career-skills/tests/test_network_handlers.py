@@ -264,6 +264,26 @@ def test_search_route_budget_consumed(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(context.metadata["public_search_query_hashes"]) == 2
 
 
+def test_search_route_budget_can_be_boundedly_extended_for_aggregator_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_dns(monkeypatch)
+    monkeypatch.setattr(
+        public_search.requests, "get", lambda url, **kwargs: _fake_response("<html></html>")
+    )
+    context = _context()
+    context.metadata["search_route_budget"] = 4
+    for index in range(4):
+        public_search.search_public_job_pages(
+            context, SearchPublicJobPagesInput(query=f"AI 岗位 {index}")
+        )
+    with pytest.raises(CareerToolError) as excinfo:
+        public_search.search_public_job_pages(
+            context, SearchPublicJobPagesInput(query="AI 岗位 4")
+        )
+    assert excinfo.value.code == "route_already_consumed"
+
+
 # ---------------------------------------------------------------------------
 # classify-job-url: host -> probe signal cascade
 # ---------------------------------------------------------------------------

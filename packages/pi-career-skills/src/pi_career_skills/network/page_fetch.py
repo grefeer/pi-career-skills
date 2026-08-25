@@ -42,6 +42,21 @@ from ..business.job_discovery.models import (
 from . import playwright_worker
 from .adapters import _fetch_via_adapter
 from .page_links import _HtmlLinkCollector
+from .request_governor import (
+    before_request as _govern_before_request,
+)
+from .request_governor import (
+    ensure_available as _govern_ensure_available,
+)
+from .request_governor import (
+    get_cached_page as _govern_get_cached_page,
+)
+from .request_governor import (
+    put_cached_page as _govern_put_cached_page,
+)
+from .request_governor import (
+    remember_blocked as _govern_remember_blocked,
+)
 from .url_guard import PublicFetchError, _assert_public_url
 from .wechat import _fetch_wechat_article_page
 
@@ -172,6 +187,7 @@ def _blocked_domains(context: Any) -> set[str]:
 
 
 def _ensure_domain_available(context: Any, url: str) -> None:
+    _govern_ensure_available(context, url)
     domain = _domain_scope(url)
     if domain in _blocked_domains(context):
         raise PublicFetchError(
@@ -192,6 +208,7 @@ def _remember_blocked_domain(
     context.metadata.setdefault("blocked_public_domain_reasons", {})[
         _domain_scope(url)
     ] = error.code
+    _govern_remember_blocked(context, url, error.code)
 
 
 def _fetch_validated(url: str) -> HttpFetchResult:
@@ -297,6 +314,10 @@ def fetch_public_job_page(
     """
     _assert_public_url(payload.url)
     _ensure_domain_available(context, payload.url)
+    cached_page = _govern_get_cached_page(context, payload.url)
+    if cached_page is not None:
+        return cached_page
+    _govern_before_request(context, payload.url)
     # Record this requested URL in the step-scoped fetched set so a later
     # fetch (single or batch) reports it as duplicate instead of re-fetching.
     shared_fetched = context.metadata.get("fetched_job_urls")
@@ -304,12 +325,15 @@ def fetch_public_job_page(
         shared_fetched.append(payload.url)
     wechat_page = _fetch_wechat_article_page(context, payload.url)
     if wechat_page is not None:
+        _govern_put_cached_page(context, wechat_page)
         return wechat_page
     adapter_page = _fetch_via_adapter(payload.url)
     if adapter_page is not None:
+        _govern_put_cached_page(context, adapter_page)
         return adapter_page
     try:
         page = _fetch_public_page_requests(payload.url)
+        _govern_put_cached_page(context, page)
         return page
     except PublicFetchError as error:
         _remember_blocked_domain(context, payload.url, error)
@@ -331,6 +355,7 @@ def fetch_public_job_page(
             status_code=rendered_status,
             detail_links=rendered_links,
         )
+        _govern_put_cached_page(context, page)
         return page
     except PublicFetchError as error:
         _remember_blocked_domain(context, payload.url, error)

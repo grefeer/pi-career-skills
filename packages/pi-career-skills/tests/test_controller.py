@@ -53,7 +53,7 @@ from pi_career_skills.errors import (
     NO_PROGRESS,
 )
 from pi_career_skills.registry import ToolDefinition
-from pi_career_skills.runtime.agent_hooks import ControllerHooks
+from pi_career_skills.runtime.agent_hooks import ControllerHooks, _deliverable_ready
 from pi_career_skills.runtime.budgets import BudgetLimits
 from pi_career_skills.runtime.controller import CareerRunController, RunRequest
 from pi_career_skills.runtime.evidence import EvidenceStore
@@ -1518,3 +1518,25 @@ def test_controller_run_id_generation(
     result = asyncio.run(c.run(RunRequest(task="hi", needed_skills=())))
     assert result.run_id
     assert len(result.run_id) == 32
+
+
+def test_deliverable_ready_stops_skill_after_durable_result() -> None:
+    from types import SimpleNamespace
+
+    artifact = SimpleNamespace(
+        artifact_type="structured_job_details",
+        quality="job_bearing",
+        source_url="https://example.com/jobs/ai-agent",
+        content={
+            "candidates": [
+                {
+                    "title": "AI Agent Engineer",
+                    "responsibilities": "Build production agent workflows.",
+                    "requirements": "Python and RAG experience.",
+                    "source_url": "https://example.com/jobs/ai-agent",
+                }
+            ]
+        },
+    )
+
+    assert _deliverable_ready("job-discovery", [artifact]) is True

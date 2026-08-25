@@ -112,6 +112,57 @@ def test_no_confirmed_facts_yields_safe_actions_only() -> None:
     assert "尚无已确认事实" in result.safe_actions[0]
 
 
+def test_unmatched_keywords_still_materialize_reviewable_brief() -> None:
+    evidence = [
+        {
+            "artifact_id": "art3",
+            "source_url": "https://yunqi.example.com/jobs/agent",
+            "quality": "jd_complete",
+            "visible_text": "AI Agent 开发工程师 负责智能体应用开发",
+        }
+    ]
+    result = build_resume_tailoring_brief(
+        _ctx(
+            {
+                "observed_public_evidence": evidence,
+                "confirmed_profile_facts": {"skills": ["Python"]},
+                "task_goal": "AI Agent 开发工程师",
+            }
+        ),
+        BuildResumeTailoringBriefInput(
+            target_artifact_id="art3", target_keywords=["Kubernetes"]
+        ),
+    )
+    assert result.safe_actions
+    assert "未出现" in result.safe_actions[0]
+
+
+def test_tailoring_persists_canonical_id_for_observed_selector() -> None:
+    evidence = [
+        {
+            "artifact_id": "canonical-jd",
+            "content_hash": "a" * 64,
+            "source_url": "https://example.com/jobs/frontend",
+            "visible_text": "前端开发工程师 熟悉 Vue3",
+        }
+    ]
+    result = build_resume_tailoring_brief(
+        _ctx(
+            {
+                "observed_public_evidence": evidence,
+                "confirmed_profile_facts": {"skills": ["Vue3"]},
+                "task_goal": "前端开发工程师",
+            }
+        ),
+        BuildResumeTailoringBriefInput(
+            target_artifact_id="observed:" + ("a" * 64),
+            target_keywords=["Vue3"],
+        ),
+    )
+    assert result.target_artifact_id == "canonical-jd"
+    assert result.proposed_diffs[0].target_evidence_ref == "canonical-jd"
+
+
 def test_target_artifact_missing_raises_not_found() -> None:
     """When the target artifact_id is absent from evidence, raise target_evidence_not_found."""
     evidence = [

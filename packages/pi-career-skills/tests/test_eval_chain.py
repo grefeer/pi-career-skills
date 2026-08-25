@@ -36,6 +36,7 @@ from pi_career_skills.business.job_matching.job_matching import (
     MatchObservedJobsOutput,
     match_observed_jobs,
 )
+from pi_career_skills.context import ToolContext
 from pi_career_skills.evaluation.audit import audit_chain
 from pi_career_skills.evaluation.chain import (
     _MAX_CHAIN_SUMMARY_CHARS,
@@ -51,7 +52,6 @@ from pi_career_skills.evaluation.chain import (
 )
 from pi_career_skills.evaluation.schema import validate_record
 from pi_career_skills.registry import ToolDefinition
-from pi_career_skills.context import ToolContext
 from pi_career_skills.runtime.controller import CareerRunController
 
 # ======================================================================
@@ -447,50 +447,30 @@ async def test_two_link_chain_inherits(
         {"resume_text": "test"},
     )
 
-    # Link 2's model prompt carries the chain-context note + structured
-    # supplement (end-to-end wiring of _chain_context_note).
+    # Link 2's model prompt carries only the fixed reference supplement; prior
+    # model summaries and full JD bodies must not cross the prompt boundary.
     assert len(captured_tasks) == 2
-    assert "上一环节（C001-L1）" in captured_tasks[1]
     assert "【上一环节已收集的岗位】" in captured_tasks[1]
+    assert "上一环节（C001-L1）" not in captured_tasks[1]
+    assert "负责后端系统开发与维护" not in captured_tasks[1]
 
-    # The real downstream handlers consume ToolContext.metadata, which the
-    # controller derives from RunRequest.private_context.  Seed artifacts
-    # alone therefore cannot provide inherited evidence to those handlers.
+    # The downstream context contains only trusted profile facts.  Full
+    # inherited evidence is transported once through seed_artifacts and
+    # re-projected by EvidenceStore at the controller boundary.
     downstream_request = captured_requests[1]
     downstream_context = downstream_request.private_context
     assert downstream_context is not None
     assert downstream_context["confirmed_profile_facts"]
-    evidence = downstream_context["observed_public_evidence"]
-    assert len(evidence) == 1
-    assert {
-        key: evidence[0][key]
-        for key in ("source_url", "content_hash", "artifact_type", "visible_text")
-    } == {
-        "source_url": "https://example.com/job/1",
-        "content_hash": _sha256_hex("page:https://example.com/job/1"),
-        "artifact_type": "public_job_page",
-        "visible_text": (
-            "负责后端系统开发与维护，需要3年以上Java经验。\n"
-            "岗位要求：Java, Spring Boot, MySQL"
-        ),
-    }
-    assert evidence[0]["artifact_id"]
-    candidates = downstream_context["structured_job_candidates"]
-    assert len(candidates) == 1
-    assert candidates[0]["source_url"] == "https://example.com/job/1"
-    assert candidates[0]["title"] == "Java 后端开发工程师"
-    assert candidates[0]["company"] == "示例科技"
-    assert candidates[0]["locations"] == ["北京"]
+    assert "observed_public_evidence" not in downstream_context
+    assert "structured_job_candidates" not in downstream_context
 
-    # The context payload must not share nested candidate objects with seed
-    # artifacts, whose consumers may mutate their local content.
+    # Seed artifacts retain the full evidence for trusted downstream tools.
     structured_seed = next(
         artifact
         for artifact in downstream_request.seed_artifacts or []
         if artifact.artifact_type == "structured_job_details"
     )
-    structured_seed.content["candidates"][0]["title"] = "mutated seed"
-    assert candidates[0]["title"] == "Java 后端开发工程师"
+    assert structured_seed.content["candidates"][0]["responsibilities"]
 
     # File written, no tmp leftover.
     assert (out_dir / f"{cid}.json").exists()

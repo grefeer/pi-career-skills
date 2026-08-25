@@ -238,6 +238,10 @@ _INVALID_TITLE_MARKERS = (
     "安全防范",
     "查看全部",
 )
+_GENERIC_PAGE_TITLES = frozenset({"招聘", "招聘公告", "招聘信息", "校园招聘", "招聘简章"})
+_JD_SECTION_MARKERS = (
+    "岗位职责", "任职要求", "职位描述", "工作内容", "招聘要求", "岗位要求",
+)
 _GRADUATE_MARKERS = (
     "应届",
     "校招",
@@ -252,6 +256,10 @@ _GRADUATE_MARKERS = (
     "internship",
 )
 _RECENT_DAYS_RE = re.compile(r"(?:最近|近)\s*(\d+)\s*天")
+_LABELED_PUBLICATION_DATE_RE = re.compile(
+    r"(?:发布时间|发布日期|发布于|更新时间|更新日期)\s*[:：]?\s*"
+    r"(\d{4}[-/.]\d{1,2}[-/.]\d{1,2})"
+)
 
 
 def match_observed_jobs(
@@ -306,8 +314,39 @@ def match_observed_jobs(
             ):
                 continue
             match = _match_candidate(candidate, payload, goal_role_terms=goal_role_terms)
-            if match is not None:
+            # A deterministic matching fallback may intentionally provide no
+            # profile keywords. In that case a provenance-bound, substantive
+            # structured JD remains a valid candidate even with score 0; raw
+            # pages stay score-gated below to prevent navigation false hits.
+            if match is not None and (
+                _meaningful_match(match) or not payload.profile_keywords
+            ):
                 matches.append(match)
+        # Structured extraction is preferred, but it is not authoritative
+        # when it only captured an unrelated seed/list candidate.  The same
+        # run may already contain complete public JD pages; use those as a
+        # provenance-bound fallback instead of declaring a false no-match.
+        if not matches:
+            raw_matches = _match_raw_evidence(
+                context, payload, goal_role_terms=goal_role_terms
+            )
+            if raw_matches:
+                matches = raw_matches
+                raw_evidence = context.metadata.get("observed_public_evidence", [])
+                evaluated_raw = [
+                    item
+                    for item in raw_evidence
+                    if isinstance(item, dict)
+                    and item.get("quality") not in {"list_only", "js_shell", "empty"}
+                    and isinstance(item.get("source_url"), str)
+                    and bool(item.get("source_url"))
+                    and isinstance(item.get("visible_text"), str)
+                    and bool(str(item.get("visible_text")).strip())
+                ] if isinstance(raw_evidence, list) else []
+                evaluated_candidate_count = len(evaluated_raw)
+                evaluated_source_urls = list(
+                    dict.fromkeys(str(item["source_url"]) for item in evaluated_raw)
+                )
     else:
         matches = _match_raw_evidence(context, payload, goal_role_terms=goal_role_terms)
         raw_evidence = context.metadata.get("observed_public_evidence", [])
@@ -379,10 +418,36 @@ def _match_raw_evidence(
         ):
             continue
         title = item.get("title")
+        if isinstance(title, str) and title.strip() in _GENERIC_PAGE_TITLES:
+            # A campus announcement page can be valid discovery evidence but
+            # is not itself a single role candidate; its detail links must be
+            # extracted before matching.
+            continue
+        # Some static detail pages omit an HTML title.  In that case require
+        # unmistakable JD section labels before treating a long page as a
+        # candidate; navigation/list pages otherwise contain stray role words
+        # and produce score-0 false positives.
+        if (
+            (not isinstance(title, str) or not title.strip())
+            and not any(marker in visible_text for marker in _JD_SECTION_MARKERS)
+        ):
+            continue
+        if not _candidate_meets_goal_constraints(
+            {
+                "title": title,
+                "full_text": visible_text,
+                "visible_text": visible_text,
+                "source_url": source_url,
+                "published_at": item.get("published_at"),
+                "recruitment_types": item.get("recruitment_types"),
+            },
+            context.metadata.get("task_goal"),
+            context.metadata.get("confirmed_profile_facts"),
+        ):
+            continue
         normalized_title = title if isinstance(title, str) else None
         searchable = f"{normalized_title or ''}\n{visible_text}".lower()
-        matches.append(
-            _score_job(
+        match = _score_job(
                 artifact_id=artifact_id,
                 source_url=source_url,
                 title=normalized_title,
@@ -394,8 +459,14 @@ def _match_raw_evidence(
                     item, context.metadata.get("task_goal")
                 ),
             )
-        )
+        if _meaningful_match(match):
+            matches.append(match)
     return matches
+
+
+def _meaningful_match(match: ObservedJobMatch) -> bool:
+    """Reject score-zero pages with no matched evidence as non-candidates."""
+    return bool(match.score > 0 or match.matched_keywords or match.matched_locations)
 
 
 def _match_candidate(
@@ -620,6 +691,8 @@ def _candidate_meets_goal_constraints(
         return True
     title = candidate.get("title")
     title_text = title.strip() if isinstance(title, str) else ""
+    if title_text in _GENERIC_PAGE_TITLES:
+        return False
     if title_text and any(marker in title_text for marker in _INVALID_TITLE_MARKERS):
         return False
     searchable = _candidate_searchable_text(candidate)
@@ -802,6 +875,18 @@ def _candidate_recency_verified(
         None,
     )
     observed = _parse_observed_date(timestamp)
+    if observed is None:
+        # Static campus pages commonly expose the authoritative publication
+        # date only inside visible text rather than a normalized metadata
+        # field.  Read it only when explicitly labelled; never infer from
+        # crawl time or arbitrary dates such as application deadlines.
+        visible = "\n".join(
+            str(candidate.get(key) or "")
+            for key in ("visible_text", "full_text", "page_text_prefix")
+        )
+        labeled = _LABELED_PUBLICATION_DATE_RE.search(visible)
+        if labeled:
+            observed = _parse_observed_date(labeled.group(1))
     if observed is None:
         return False
     recent_days = _requested_recent_days(goal)

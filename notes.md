@@ -8,6 +8,24 @@
 - Next evidence target: Q045 rerun, then C001/C003/C002 real chain records. Full 83-record run is conditional on those records being schema-valid and the local runner remaining healthy.
 - Triaging rule: classify external anti-bot/site availability, expected handoffs, and budget exhaustion separately from local runner/schema/completion-gate defects.
 
+## Failure-review protocol (2026-08-24)
+
+Every future evaluation failure will be reviewed across five dimensions before the next code change:
+
+1. Goal boundary and reasoning paradigm: verify the question's autonomy/handoff boundary, allowed skills, and whether the supervisor's ReAct loop is the right control pattern.
+2. Perception and memory: verify bounded context, persisted artifact refs, projection freshness, and deterministic target resolution before changing prompts.
+3. Tools and action execution: verify structured AgentTask/tool schemas, prerequisite routing, retry/timeout behavior, and loop termination.
+4. Robustness and observability: verify checkpoint/state continuity, budget and step caps, repeated-failure halting, and event-level evidence for the diagnosis.
+5. Evaluation and feedback loop: define the regression test and success/waiting-user metric that must improve after the change.
+
+## Latest non-chain failure review (2026-08-24)
+
+- Q017: evidence storage omitted `career_preparation_plan` from the job-bearing set, so successful plan tools were invisible to completion. Fixed and covered by an EvidenceStore regression; the produced record re-audits to `passed` after accepting `observed:<hash>` aliases.
+- Q028: 173 public pages were collected but no usable structured JD emerged. Empty pages, fetch/SSL failures, OCR-disabled content, and route exhaustion make this an unavoidable `waiting_user` handoff, not a local contract failure.
+- Q057: a navigation title (`招聘日历`) with a long body passed runtime candidate validation but failed audit. Added the title to the shared navigation blacklist so runtime completion and audit reject it consistently.
+- Q055: the first two live runs were stopped after prolonged activity; the bounded retry produced a formal `waiting_user/budget_exhausted` record with anti-bot, empty-page, and route-exhaustion evidence.
+- Bounded rerun: `run_question(..., wall_clock_seconds=120)` now cancels a stuck LLM stream and writes a formal `waiting_user/timeout` record. Q046 and Q011 both produced such records; the timeout is accompanied by route/target-evidence events, not a silent process kill.
+
 ## P0 evidence found before Layer 3/4
 
 - `eval_results/pi_real_nonchain/Q045.json`: timestamp `09:03:16`; completion-gate fix commit `aa61c07`: `09:04:12`. No evaluation process was present at the later snapshot, so the file cannot validate the fix.

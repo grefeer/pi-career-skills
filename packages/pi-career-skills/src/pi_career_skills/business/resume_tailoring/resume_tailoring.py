@@ -5,19 +5,20 @@ from __future__ import annotations
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
+from pydantic import BaseModel, Field, field_validator
+
 from pi_career_skills.business.job_discovery.target_evidence import (
     resolve_target_evidence,
 )
-from pydantic import BaseModel, Field, field_validator
-
 from pi_career_skills.context import ToolContext
+from pi_career_skills.errors import CareerToolError
 
 
-class ResumeTailoringError(RuntimeError):
+class ResumeTailoringError(CareerToolError):
     """Stable, non-sensitive resume-tailoring failure."""
 
-    def __init__(self, code: str) -> None:
-        super().__init__(code)
+    def __init__(self, code: str, message: str = "") -> None:
+        super().__init__(code, message or code)
         self.code = code
 
 
@@ -76,7 +77,10 @@ def build_resume_tailoring_brief(
         payload.target_artifact_id,
     )
     if target is None:
-        raise ResumeTailoringError("target_evidence_not_found")
+        raise ResumeTailoringError(
+            "target_evidence_not_found",
+            f"target_artifact_id not found; available refs: {_available_refs(context)}",
+        )
     visible_text = target.get("visible_text")
     if isinstance(visible_text, str) and visible_text.strip():
         source_url = target.get("source_url")
@@ -92,6 +96,12 @@ def build_resume_tailoring_brief(
             raise ResumeTailoringError("target_role_mismatch")
     else:
         raise ResumeTailoringError("target_evidence_incomplete")
+    # The model may select an ``observed:<hash>`` or candidate alias.  Keep
+    # that selector only as an input concern; persisted deliverables must
+    # point at the canonical artifact id for provenance and auditability.
+    canonical_target_id = target.get("artifact_id")
+    if not isinstance(canonical_target_id, str) or not canonical_target_id.strip():
+        canonical_target_id = payload.target_artifact_id
     required_keywords = [
         (keyword, keyword.lower())
         for keyword in payload.target_keywords
@@ -117,12 +127,20 @@ def build_resume_tailoring_brief(
         actions.append(
             f"{'、'.join(display for display, _normalized in missing_pairs)} 尚无已确认事实：仅在能补充项目证据时添加，不得虚构。"
         )
+    if not required_keywords:
+        # A model may provide broad or misspelled keywords that do not occur in
+        # the observed JD.  Preserve a useful, reviewable deliverable instead
+        # of returning an empty action list that the evidence validator must
+        # discard as non-materialized output.
+        actions.append(
+            "目标 JD 未出现所请求关键词的可核验匹配：暂不新增关键词，先人工确认岗位原文与目标方向。"
+        )
     proposed_diffs = [
         ResumeTailoringDiff(
             op="highlight",
             section=_resume_section_for_fact(fact_ref),
             fact_ref=fact_ref,
-            target_evidence_ref=payload.target_artifact_id,
+            target_evidence_ref=canonical_target_id,
             change_summary=(
                 f"将已确认的 {display} 事实前置到"
                 f"{_resume_section_label(_resume_section_for_fact(fact_ref))}部分，并保留原有可核验表述。"
@@ -133,7 +151,7 @@ def build_resume_tailoring_brief(
         is not None
     ]
     return ResumeTailoringBriefOutput(
-        target_artifact_id=payload.target_artifact_id,
+        target_artifact_id=canonical_target_id,
         target_title=target_title,
         source_url=source_url,
         source_attribution=_source_attribution(source_url, job_text),
@@ -151,6 +169,22 @@ def _find_target(raw_evidence: object, artifact_id: str) -> dict[str, Any] | Non
         if isinstance(item, dict) and item.get("artifact_id") == artifact_id:
             return item
     return None
+
+
+def _available_refs(context: ToolContext) -> str:
+    refs: list[str] = []
+    for key in ("observed_public_evidence", "structured_job_candidates"):
+        values = context.metadata.get(key)
+        if not isinstance(values, list):
+            continue
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            for field in ("artifact_id", "candidate_id", "source_artifact_id"):
+                value = item.get(field)
+                if isinstance(value, str) and value and value not in refs:
+                    refs.append(value)
+    return ", ".join(refs[:8]) or "none"
 
 
 def _target_matches_goal(goal: object, searchable: str) -> bool:

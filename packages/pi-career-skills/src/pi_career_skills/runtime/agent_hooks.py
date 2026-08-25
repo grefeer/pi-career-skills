@@ -29,6 +29,60 @@ _SOFT_STALL_WRAP_UP = (
     "已连续多轮未产生新证据，请基于现有证据直接给出最终结论并结束。"
 )
 
+# Keep the hook's early-stop gate at least as strict as the durable completion
+# policy. A navigation label or copied snippet must not stop discovery before
+# a source-backed JD has been persisted.
+_DISCOVERY_NAV_LABEL_TITLES = frozenset(
+    {
+        "浏览职位", "查看全部", "招聘观察", "申请职位", "职位", "岗位",
+        "职位列表", "岗位列表", "热门职位", "招聘职位", "首页", "招聘",
+        "投递", "登录", "注册", "联系我们", "关于我们", "返回", "更多",
+    }
+)
+
+
+def _real_discovery_candidate(artifact: Any, candidate: Any) -> bool:
+    if not isinstance(candidate, dict):
+        return False
+    title = candidate.get("title")
+    if not isinstance(title, str):
+        return False
+    title = title.strip()
+    if len(title) < 2 or title in _DISCOVERY_NAV_LABEL_TITLES:
+        return False
+    if not any(
+        ("一" <= ch <= "鿿") or (ch.isascii() and ch.isalpha())
+        for ch in title
+    ):
+        return False
+    body = f"{candidate.get('responsibilities') or ''} {candidate.get('requirements') or ''}".strip()
+    if len(body) < 20:
+        return False
+    quality = getattr(artifact, "quality", None) or (
+        getattr(artifact, "content", None) or {}
+    ).get("quality")
+    if quality is not None and quality not in {"job_bearing", "jd_complete"}:
+        return False
+    artifact_source = getattr(artifact, "source_url", None) or (
+        getattr(artifact, "content", None) or {}
+    ).get("source_url")
+    if not isinstance(artifact_source, str) or not artifact_source.strip():
+        return False
+    candidate_sources = (
+        candidate.get("source_url"),
+        candidate.get("page_source_url"),
+        candidate.get("apply_url"),
+    )
+    # EvidenceStore has already attached the structured artifact to its
+    # observed source. Some extractors preserve only an apply URL on each
+    # candidate; a quality-qualified artifact is therefore sufficient for the
+    # early-stop gate, while matching source fields remain preferred when
+    # present.
+    return (
+        any(source == artifact_source for source in candidate_sources)
+        or quality == "job_bearing"
+    )
+
 
 @dataclass
 class ControllerHooks:
@@ -73,6 +127,7 @@ def build_controller_hooks(
             ``None`` means the supervisor.
     """
     soft_stall_steered: list[bool] = [False]
+    external_failure_counts: dict[str, int] = {}
     agent_ref_box: list[Any] = [None]
     refresh_box = context_refresh_box if context_refresh_box is not None else [None]
     kind_label = skill_name or "supervisor"
@@ -165,6 +220,53 @@ def build_controller_hooks(
             guard.set_artifact_count(len(store.job_bearing_artifacts()))
             succeeded = details.status == "succeeded"
             produced = bool(promoted)
+            external_terminate = False
+
+            # A route-exhausted or permanently blocked public source is an
+            # external handoff, not a reason to spend the remaining model
+            # budget inventing more URLs.  Only short-circuit when no usable
+            # evidence exists; if artifacts are already present, the agent
+            # still gets a chance to complete downstream work.
+            error_code = details.error_code or ""
+            if not succeeded and error_code in {
+                "anti_bot_challenge",
+                "captcha",
+                "login_required",
+                "needs_manual_review",
+            }:
+                external_failure_counts["blocked_public_source"] = (
+                    external_failure_counts.get("blocked_public_source", 0) + 1
+                )
+            if not succeeded and error_code in {
+                "route_already_consumed",
+                "wechat_ocr_disabled",
+            }:
+                external_failure_counts[error_code] = (
+                    external_failure_counts.get(error_code, 0) + 1
+                )
+                if (
+                    external_failure_counts[error_code] >= 2
+                    and not store.job_bearing_artifacts()
+                ):
+                    _record_halt(
+                        error_code,
+                        f"{error_code}: no usable public evidence remains",
+                    )
+                    external_terminate = True
+                elif (
+                    error_code == "route_already_consumed"
+                    and external_failure_counts.get("blocked_public_source", 0) > 0
+                ):
+                    # A route exhausted after an anti-bot/manual-review
+                    # signal is a genuine human hand-off, even when partial
+                    # artifacts exist. Do not spend recovery budget replaying
+                    # a source that the browser has already identified as
+                    # blocked.
+                    _record_halt(
+                        "anti_bot_challenge",
+                        "public source requires manual review after anti-bot challenge",
+                    )
+                    external_terminate = True
 
             try:
                 signal = guard.note_call(
@@ -180,6 +282,10 @@ def build_controller_hooks(
                 raise
 
             # Soft stall — steer ONCE with wrap-up message.
+            if signal == "repeated_tool_failure":
+                _record_halt(NO_PROGRESS, f"repeated failure for {name}")
+                return {"terminate": True}
+
             if signal == "soft_stop" and not soft_stall_steered[0]:
                 soft_stall_steered[0] = True
                 agent = agent_ref_box[0]
@@ -207,9 +313,18 @@ def build_controller_hooks(
                     "tool_name": name,
                     "status": details.status,
                     "error_code": details.error_code or "",
+                    "error_message": getattr(details, "error_message", "") or "",
                     "promoted_artifacts": len(promoted),
                 },
             )
+            # A durable deliverable is the skill's terminal contract.  Stop
+            # the model loop immediately after promotion so it cannot keep
+            # browsing, re-extracting the same pages, or retrying a consumed
+            # route after the business result is already available.
+            if skill_name and _deliverable_ready(skill_name, promoted):
+                return {"terminate": True}
+            if external_terminate:
+                return {"terminate": True}
             return None
 
         # Case 2: supervisor delegate tool (details is a dict).
@@ -264,6 +379,50 @@ def _is_tool_observation(details: Any) -> bool:
         and "tool_name" in details
         and "status" in details
     )
+
+
+def _deliverable_ready(skill_name: str, artifacts: list[Any]) -> bool:
+    """Return whether a newly promoted artifact satisfies a skill contract."""
+    expected = {
+        "job-discovery": {"public_job_page", "structured_job_details"},
+        "job-matching": {"job_matching_report"},
+        "resume-tailoring": {"resume_tailoring_brief"},
+        "career-planning": {"career_preparation_plan"},
+    }.get(skill_name, set())
+    for artifact in artifacts:
+        if getattr(artifact, "artifact_type", None) not in expected:
+            continue
+        content = getattr(artifact, "content", None) or {}
+        if skill_name == "job-discovery":
+            if artifact.artifact_type == "public_job_page" and (
+                content.get("quality") == "jd_complete"
+                or getattr(artifact, "quality", None) == "jd_complete"
+            ):
+                return True
+            candidates = content.get("candidates") or content.get("details") or []
+            if any(_real_discovery_candidate(artifact, candidate) for candidate in candidates):
+                return True
+        elif skill_name == "job-matching":
+            matches = content.get("matches")
+            if isinstance(matches, list) and matches:
+                return True
+            if (
+                content.get("no_match_reason")
+                == "no_candidate_satisfied_constraints"
+                and isinstance(content.get("evaluated_candidate_count"), int)
+                and not isinstance(content.get("evaluated_candidate_count"), bool)
+                and content["evaluated_candidate_count"] >= 0
+            ):
+                return True
+        elif skill_name == "resume-tailoring":
+            if content.get("target_artifact_id") and content.get("safe_actions"):
+                return True
+        elif skill_name == "career-planning":
+            if content.get("target_artifact_id") and (
+                content.get("plan_items") or content.get("actions")
+            ):
+                return True
+    return False
 
 
 __all__ = [

@@ -22,6 +22,7 @@ from .audit import audit_record
 from .profile_facts import build_profile_facts
 from .schema import validate_record
 from .seed_urls import ALL_SKILLS, resolve_seed_urls
+from .url_utils import dedupe_seed_urls
 
 
 def default_controller_factory(
@@ -175,6 +176,7 @@ async def run_question(
     model_id: str,
     controller_factory: Callable[..., CareerRunController] | None = None,
     work_root: Path | None = None,
+    wall_clock_seconds: int = 600,
 ) -> dict[str, Any]:
     """Run one non-chain question and write the result record.
 
@@ -198,7 +200,19 @@ async def run_question(
     meta = doc.get("meta", {})
     profile = doc.get("profile", {})
 
-    seeded_urls, _seed_note = resolve_seed_urls(qid)
+    normalized_urls = meta.get("target_urls") if isinstance(meta, dict) else None
+    if isinstance(normalized_urls, list) and all(
+        isinstance(url, str) and url.strip() for url in normalized_urls
+    ):
+        seeded_urls = dedupe_seed_urls(normalized_urls)
+        original_urls, _seed_note = resolve_seed_urls(qid)
+        for url in original_urls:
+            # Normalized target URLs express the revised role family; the
+            # curated parity seeds still identify the real source route (for
+            # example Liepin landing pages) and must remain available.
+            seeded_urls = dedupe_seed_urls([*seeded_urls, url])
+    else:
+        seeded_urls = dedupe_seed_urls(resolve_seed_urls(qid)[0])
 
     # Build task with seed URL supplement (record keeps original question).
     task = question
@@ -211,15 +225,27 @@ async def run_question(
 
     facts = build_profile_facts(profile)
     needed_skills = tuple(meta.get("skills") or ALL_SKILLS)
+    allowed_skills = _allowed_skills_for_needed(needed_skills)
 
     request = RunRequest(
         task=task,
         user_id=f"eval-{qid}",
         run_id=f"run-{qid}",
-        allowed_skills=tuple(ALL_SKILLS),
+        allowed_skills=allowed_skills,
         needed_skills=needed_skills,
-        budget=BudgetLimits(wall_clock_seconds=600),
-        private_context={"confirmed_profile_facts": facts},
+        budget=BudgetLimits(wall_clock_seconds=wall_clock_seconds),
+        private_context={
+            "confirmed_profile_facts": facts,
+            # Keep seed URLs machine-readable as well as in the task text;
+            # discovery tools can then honor the direct-fetch rule without
+            # relying on the model to copy URLs out of prose.
+            "candidate_urls": list(seeded_urls),
+            # Keep search deliberately bounded for evaluation and production:
+            # an aggregator is a fallback source, not permission to fan out
+            # across several gated providers.  The tool still deduplicates
+            # queries and stops immediately after usable evidence appears.
+            "search_route_budget": 2,
+        },
     )
 
     work_base = work_root or (out_dir / "_work")
@@ -254,6 +280,17 @@ async def run_question(
     os.replace(tmp_path, out_path)
 
     return record
+
+
+def _allowed_skills_for_needed(needed_skills: tuple[str, ...]) -> tuple[str, ...]:
+    """Expose only requested capabilities plus the discovery prerequisite."""
+    needed = set(needed_skills)
+    if not needed:
+        return tuple(ALL_SKILLS)
+    allowed = {skill for skill in needed if skill in ALL_SKILLS}
+    if allowed - {"job-discovery"}:
+        allowed.add("job-discovery")
+    return tuple(skill for skill in ALL_SKILLS if skill in allowed)
 
 
 def main() -> None:

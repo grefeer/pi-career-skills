@@ -224,6 +224,7 @@ def _project_candidates(
                     "artifact_id": candidate.get("artifact_id")
                     or content.get("artifact_id")
                     or artifact.artifact_id,
+                    "store_artifact_id": artifact.artifact_id,
                     "artifact_aliases": _joined_lists(
                         candidate.get("artifact_aliases"), content.get("artifact_aliases")
                     ),
@@ -277,6 +278,7 @@ def _add_candidate_record(
     )
     records[key] = {
         "artifact_id": artifact_id,
+        "store_artifact_id": _bounded_string(raw.get("store_artifact_id"), _MAX_ID_CHARS) or "",
         "artifact_aliases": aliases,
         "source_artifact_id": _first_alias(source_aliases, artifact_id),
         "source_artifact_aliases": source_aliases,

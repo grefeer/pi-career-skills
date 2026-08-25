@@ -99,6 +99,7 @@ _NAV_LABEL_TITLES = frozenset(
         "岗位列表",
         "热门职位",
         "招聘职位",
+        "招聘日历",
         "首页",
         "招聘",
         "投递",
@@ -121,6 +122,7 @@ _JOB_BEARING_ARTIFACT_TYPES = frozenset(
         "structured_job_details",
         "job_matching_report",
         "resume_tailoring_brief",
+        "career_preparation_plan",
     }
 )
 

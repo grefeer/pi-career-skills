@@ -42,6 +42,18 @@ def resolve_target_evidence(
         target_id,
         target_source_url=target_source_url,
     )
+    # Models occasionally emit a stale/opaque pointer even when discovery
+    # produced exactly one usable structured candidate.  In that bounded case
+    # the candidate is unambiguous, so recover deterministically instead of
+    # making the downstream agent spin on target_evidence_not_found.
+    if candidate is None and isinstance(structured_candidates, list):
+        usable = [
+            item
+            for item in structured_candidates
+            if isinstance(item, dict) and _candidate_text(item)
+        ]
+        if len(usable) == 1:
+            candidate = usable[0]
     if candidate is None:
         return target
 
@@ -58,7 +70,11 @@ def resolve_target_evidence(
             "selected_evidence_ref": target_id,
             "candidate_id": candidate.get("candidate_id"),
             "source_artifact_id": candidate.get("source_artifact_id"),
-            "source_url": candidate.get("page_source_url") or candidate.get("source_url"),
+            "source_url": (
+                candidate.get("page_source_url")
+                or candidate.get("source_url")
+                or candidate.get("apply_url")
+            ),
             "apply_url": candidate.get("apply_url") or candidate.get("source_url"),
             "title": candidate.get("title"),
             "visible_text": candidate_text,
@@ -75,6 +91,7 @@ def _find_raw_target(raw_evidence: object, target_id: str) -> dict[str, Any] | N
     for item in raw_evidence:
         if isinstance(item, dict) and (
             item.get("artifact_id") == target_id
+            or item.get("store_artifact_id") == target_id
             or _has_alias(item, "artifact_aliases", target_id)
             or _normalized_url(item.get("source_url")) == _normalized_url(target_id)
             or f"observed:{item.get('content_hash')}" == target_id
@@ -97,10 +114,14 @@ def _find_structured_candidate(
         if (
             target_id.strip() == candidate.get("candidate_id")
             or target_id == candidate.get("artifact_id")
+            or target_id == candidate.get("store_artifact_id")
             or _has_alias(candidate, "artifact_aliases", target_id)
             or target_id == candidate.get("source_artifact_id")
             or _has_alias(candidate, "source_artifact_aliases", target_id)
-            or _normalized_url(target_id) == _normalized_url(candidate.get("source_url"))
+            or any(
+                _normalized_url(target_id) == _normalized_url(candidate.get(key))
+                for key in ("source_url", "page_source_url", "apply_url")
+            )
             or (
                 isinstance(target_source_url, str)
                 and target_source_url
@@ -108,6 +129,7 @@ def _find_structured_candidate(
                 in {
                     _normalized_url(candidate.get("source_url")),
                     _normalized_url(candidate.get("page_source_url")),
+                    _normalized_url(candidate.get("apply_url")),
                 }
             )
         ):

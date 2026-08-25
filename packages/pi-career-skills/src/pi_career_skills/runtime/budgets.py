@@ -180,10 +180,14 @@ class BudgetTracker:
 
     def wall_clock_exhausted(self) -> bool:
         """True when cumulative wall-clock time exceeds the configured limit."""
+        return self.remaining_wall_clock_seconds() <= 0.0
+
+    def remaining_wall_clock_seconds(self) -> float:
+        """Return wall-clock budget including the currently active attempt."""
         elapsed = self._consumed.wall_clock_seconds
         if self._attempt_start is not None:
-            elapsed += time.monotonic() - self._attempt_start
-        return elapsed >= self._limits.wall_clock_seconds
+            elapsed += max(0.0, time.monotonic() - self._attempt_start)
+        return max(0.0, self._limits.wall_clock_seconds - elapsed)
 
     # -- snapshots ---------------------------------------------------------
 
@@ -289,6 +293,13 @@ class DelegationBudgetTracker:
     def wall_clock_exhausted(self) -> bool:
         return self._local.wall_clock_exhausted() or self._parent.wall_clock_exhausted()
 
+    def remaining_wall_clock_seconds(self) -> float:
+        """Return the tighter local/parent wall-clock remainder."""
+        return min(
+            self._local.remaining_wall_clock_seconds(),
+            self._parent.remaining_wall_clock_seconds(),
+        )
+
     def mark_attempt_started(self) -> None:
         self._local.mark_attempt_started()
 
@@ -323,6 +334,7 @@ class ToolCallGuard:
         self._last_succeeded: tuple[str, str] | None = None
         # also keep run-wide set of all succeeded keys for cross-call dedup
         self._succeeded_keys: set[tuple[str, str]] = set()
+        self._failed_counts: dict[tuple[str, str], int] = {}
         self._stall_streak: int = 0
         self._artifact_count: int = 0
 
@@ -380,6 +392,11 @@ class ToolCallGuard:
             # Was already succeeded before; this is a re-invocation of the
             # same successful call → duplicate, no budget, no streak change.
             return "duplicate_tool_call"
+
+        if not succeeded:
+            self._failed_counts[key] = self._failed_counts.get(key, 0) + 1
+            if self._failed_counts[key] >= 3:
+                return "repeated_tool_failure"
 
         # Not a duplicate.  Execute and update progress state.
         if produced_artifact:

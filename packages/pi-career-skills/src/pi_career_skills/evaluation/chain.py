@@ -21,9 +21,10 @@ from ..runtime.budgets import BudgetLimits
 from ..runtime.controller import CareerRunController, RunRequest
 from .audit import audit_chain
 from .profile_facts import build_profile_facts
-from .runner import _run_link_inner
+from .runner import _allowed_skills_for_needed, _run_link_inner
 from .schema import validate_record
 from .seed_urls import ALL_SKILLS, resolve_seed_urls
+from .url_utils import dedupe_seed_urls
 
 #: Artifact types that carry a real, matchable job payload.
 _JOB_BEARING_ARTIFACT_TYPES = frozenset(
@@ -295,7 +296,16 @@ async def run_chain(
 
         # Resolve seeds (only link 1 has seeds by design).
         if index == 1:
-            seeded_urls, _seed_note = resolve_seed_urls(link_id)
+            normalized_urls = meta.get("target_urls") if isinstance(meta, dict) else None
+            if isinstance(normalized_urls, list) and all(
+                isinstance(url, str) and url.strip() for url in normalized_urls
+            ):
+                seeded_urls = dedupe_seed_urls(normalized_urls)
+                original_urls, _seed_note = resolve_seed_urls(link_id)
+                for url in original_urls:
+                    seeded_urls = dedupe_seed_urls([*seeded_urls, url])
+            else:
+                seeded_urls = dedupe_seed_urls(resolve_seed_urls(link_id)[0])
         else:
             seeded_urls = []
 
@@ -320,17 +330,13 @@ async def run_chain(
                 prev_artifacts
             )
 
-            # Goal supplement — visible to the model: previous-link summary
-            # note + structured candidates + confirmed facts.
-            note = _chain_context_note(
-                str(prev.get("id", "")),
-                prev.get("result", {}).get("summary"),
-            )
+            # Goal supplement is reference-only.  Full JD bodies travel once
+            # through seed_artifacts and are re-projected by EvidenceStore;
+            # neither prior model summaries nor copied evidence belong in the
+            # downstream prompt/context.
             supplement = _inherited_goal_supplement(
                 structured_candidates, profile_facts
             )
-            if note:
-                supplement = note + (("\n\n" + supplement) if supplement else "")
             if supplement:
                 goal = goal + "\n\n" + supplement
 
@@ -358,14 +364,21 @@ async def run_chain(
             task=task,
             user_id=f"eval-{link_id}",
             run_id=f"run-{link_id}",
-            allowed_skills=tuple(ALL_SKILLS),
+            # A chain link is an independent requested capability.  Exposing
+            # every skill here let the supervisor satisfy a tailoring link by
+            # rerunning matching (already present in inherited evidence),
+            # leaving the actual requested skill incomplete.
+            allowed_skills=_allowed_skills_for_needed(needed_skills),
             needed_skills=needed_skills,
             budget=BudgetLimits(wall_clock_seconds=900),
             seed_artifacts=seed_artifacts,
             private_context={
                 "confirmed_profile_facts": dict(profile_facts),
-                "observed_public_evidence": deepcopy(inherited_evidence),
-                "structured_job_candidates": deepcopy(structured_candidates),
+                "candidate_urls": list(seeded_urls),
+                # A chain may use search only as a bounded fallback.  Do not
+                # expand the route budget merely because the seed is an
+                # aggregator; that pattern increases access-control pressure.
+                "search_route_budget": 2,
             },
         )
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import date
 from typing import Literal
@@ -121,13 +122,18 @@ def build_preparation_plan(
     context: ToolContext, payload: BuildPreparationPlanInput
 ) -> CareerPreparationPlanOutput:
     """Build actions only for focus terms literally supported by one observed JD."""
+    if payload.target_artifact_id.startswith("role:"):
+        return _build_role_level_plan(context, payload)
     target = resolve_target_evidence(
         context.metadata.get("observed_public_evidence"),
         context.metadata.get("structured_job_candidates"),
         payload.target_artifact_id,
     )
     if target is None:
-        raise CareerPlanningError("target_evidence_not_found")
+        raise CareerPlanningError(
+            "target_evidence_not_found",
+            f"target_artifact_id not found; available refs: {_available_refs(context)}",
+        )
     resolved_artifact_id = target.get("artifact_id")
     if not isinstance(resolved_artifact_id, str) or not resolved_artifact_id.strip():
         raise CareerPlanningError("target_evidence_incomplete")
@@ -190,6 +196,55 @@ def build_preparation_plan(
     )
 
 
+def _build_role_level_plan(
+    context: ToolContext, payload: BuildPreparationPlanInput
+) -> CareerPreparationPlanOutput:
+    """Build a clearly role-level plan when no employer JD is available.
+
+    This path never claims employer requirements or invents a source URL. It
+    is intentionally keyed by ``role:`` so a model cannot silently downgrade a
+    JD-grounded request into generic advice.
+    """
+    goal = context.metadata.get("task_goal")
+    if not isinstance(goal, str) or not goal.strip():
+        raise CareerPlanningError("role_goal_missing")
+    profile = context.metadata.get("confirmed_profile_facts")
+    profile_text = json.dumps(profile, ensure_ascii=False) if profile else ""
+    searchable = f"{goal}\n{profile_text}".lower()
+    topic_pairs = [
+        (keyword, keyword.lower())
+        for keyword in payload.focus_keywords
+        if keyword.lower() in searchable
+    ]
+    if not topic_pairs:
+        raise CareerPlanningError("role_focus_not_supported_by_user_context")
+    scheduled = topic_pairs[: payload.time_budget_hours]
+    topic_text = "、".join(display for display, _ in scheduled)
+    schedule, schedule_assumption = _resolve_schedule(
+        payload.target_date, context.metadata.get("confirmed_target_date")
+    )
+    plan_items = _build_plan_items(scheduled, payload.time_budget_hours, schedule)
+    for item in plan_items:
+        item.evidence_basis = "user-stated role/profile (no employer JD available)"
+    role_slug = payload.target_artifact_id.removeprefix("role:").strip() or "target"
+    source_url = f"user_goal://role/{role_slug}"
+    return CareerPreparationPlanOutput(
+        target_artifact_id=payload.target_artifact_id,
+        resolved_target_artifact_id=payload.target_artifact_id,
+        selected_target_reference=payload.target_artifact_id,
+        source_url=source_url,
+        jd_topics=[normalized for _display, normalized in topic_pairs],
+        actions=[
+            f"围绕用户指定的 {topic_text} 准备可核验项目案例；本计划不代表任何雇主 JD 的硬性要求。",
+            f"针对 {topic_text} 做一次技术讲解和故障排查演练，并记录待补充的真实证据。",
+        ],
+        schedule_assumption=schedule_assumption,
+        schedule=schedule,
+        plan_items=plan_items,
+        skill_gaps=[],
+    )
+
+
 def _actions_for_topics(topic_text: str) -> list[str]:
     if not topic_text:
         return []
@@ -197,6 +252,22 @@ def _actions_for_topics(topic_text: str) -> list[str]:
         f"为 {topic_text} 各准备一个可量化的项目案例，并标明你的具体贡献。",
         f"围绕 JD 中的 {topic_text} 做一次 30 分钟技术讲解演练，准备架构取舍与故障排查追问。",
     ]
+
+
+def _available_refs(context: ToolContext) -> str:
+    refs: list[str] = []
+    for key in ("observed_public_evidence", "structured_job_candidates"):
+        values = context.metadata.get(key)
+        if not isinstance(values, list):
+            continue
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            for field in ("artifact_id", "candidate_id", "source_artifact_id"):
+                value = item.get(field)
+                if isinstance(value, str) and value and value not in refs:
+                    refs.append(value)
+    return ", ".join(refs[:8]) or "none"
 
 
 def _focus_keyword_in_text(keyword: str, searchable: str) -> bool:

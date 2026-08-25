@@ -32,12 +32,27 @@ from pi_career_skills.evaluation.runner import (
 )
 from pi_career_skills.evaluation.schema import validate_record
 from pi_career_skills.evaluation.seed_urls import resolve_seed_urls
+from pi_career_skills.evaluation.url_utils import dedupe_seed_urls
 from pi_career_skills.registry import ToolDefinition
 from pi_career_skills.runtime.controller import CareerRunController
 
 # ======================================================================
 # Helpers — same stub-registry pattern as test_controller.py
 # ======================================================================
+
+
+def test_dedupe_seed_urls_normalizes_host_path_and_query_order() -> None:
+    urls = dedupe_seed_urls(
+        [
+            "HTTPS://Example.COM/jobs/?b=2&a=1",
+            "https://example.com/jobs?a=1&b=2",
+            "https://other.example/jobs",
+        ]
+    )
+    assert urls == [
+        "HTTPS://Example.COM/jobs/?b=2&a=1",
+        "https://other.example/jobs",
+    ]
 
 
 def _sha256_hex(s: str) -> str:

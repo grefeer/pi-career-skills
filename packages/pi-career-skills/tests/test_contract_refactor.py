@@ -16,7 +16,7 @@ from pi_career_skills.agents.contracts import (
 from pi_career_skills.agents.delegation_tools import make_delegation_tool
 from pi_career_skills.agents.prompts import load_archived_skill_prompt
 from pi_career_skills.errors import CareerToolError
-from pi_career_skills.runtime.budgets import BudgetLimits, BudgetTracker
+from pi_career_skills.runtime.budgets import BudgetLimits, BudgetTracker, ToolCallGuard
 
 
 def test_structured_task_keeps_only_evidence_references() -> None:
@@ -143,6 +143,22 @@ def test_career_planning_is_a_default_capability_with_evidence_prerequisite() ->
     assert not _skill_has_evidence("career-planning", Store())
 
 
+def test_matching_accepts_complete_public_page_without_structured_projection() -> None:
+    """Raw JD fallback is a valid matching prerequisite for static pages."""
+    from pi_career_skills.runtime.controller import _skill_has_evidence
+
+    class Artifact:
+        artifact_type = "public_job_page"
+        quality = "jd_complete"
+        content = {"visible_text": "AI Agent engineer: Python and RAG."}
+
+    class Store:
+        def job_bearing_artifacts(self) -> list[object]:
+            return [Artifact()]
+
+    assert _skill_has_evidence("job-matching", Store())
+
+
 @pytest.mark.asyncio
 async def test_delegate_tool_accepts_structured_task_and_returns_safe_refs() -> None:
     captured: list[AgentTask] = []
@@ -190,6 +206,13 @@ def test_child_budget_is_bounded_and_charges_parent() -> None:
     assert parent.consumed().agent_turns == 1
     with pytest.raises(CareerToolError):
         child.consume_turn()
+
+
+def test_repeated_failed_tool_signal_stops_retry_loop() -> None:
+    guard = ToolCallGuard()
+    assert guard.note_call("tool", "same", succeeded=False, produced_artifact=False) is None
+    assert guard.note_call("tool", "same", succeeded=False, produced_artifact=False) is None
+    assert guard.note_call("tool", "same", succeeded=False, produced_artifact=False) == "repeated_tool_failure"
 
 
 def test_archived_skill_prompt_is_injected_with_project_adaptation() -> None:

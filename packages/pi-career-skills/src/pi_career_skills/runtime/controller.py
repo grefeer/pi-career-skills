@@ -15,7 +15,7 @@ import asyncio
 import contextlib
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from pi_agent_core import Agent
@@ -34,6 +34,7 @@ from ..errors import (
     INVALID_MODEL_RESPONSE,
     MODEL_API_KEY_MISSING,
     TARGET_EVIDENCE_NOT_FOUND,
+    WALL_CLOCK_BUDGET_EXHAUSTED,
     CareerToolError,
     redact_message,
 )
@@ -87,7 +88,13 @@ def _delegation_status_for_error(error_code: str) -> str:
         return "blocked"
     if error_code == DELEGATION_SKILL_ALREADY_SUCCEEDED:
         return "partial"
-    if error_code in {"budget_exhausted", "no_progress", "timeout", "rate_limited"}:
+    if error_code in {
+        "budget_exhausted",
+        "no_progress",
+        "timeout",
+        "rate_limited",
+        WALL_CLOCK_BUDGET_EXHAUSTED,
+    }:
         return "retryable"
     if error_code in {"needs_user", "manual_review_required"}:
         return "need_user"
@@ -274,7 +281,10 @@ class CareerRunController:
             tracker.mark_attempt_started()
             try:
                 hooks.agent_ref_box[0] = supervisor
-                await supervisor.prompt(request.task)
+                await asyncio.wait_for(
+                    supervisor.prompt(request.task),
+                    timeout=max(0.1, tracker.remaining_wall_clock_seconds()),
+                )
 
                 # Continue loop while last message is a tool result and no halt.
                 # Always let the supervisor produce a final text turn after the
@@ -288,7 +298,10 @@ class CareerRunController:
                     )
                 ):
                     hooks.agent_ref_box[0] = supervisor
-                    await supervisor.continue_()
+                    await asyncio.wait_for(
+                        supervisor.continue_(),
+                        timeout=max(0.1, tracker.remaining_wall_clock_seconds()),
+                    )
 
                 # Some pi-agent-core versions suppress the supervisor
                 # callback for legacy terminal delegate results.  Completion
@@ -315,6 +328,10 @@ class CareerRunController:
                     attempt_id=attempt_id,
                     halt_box=halt_box,
                 )
+            except TimeoutError:
+                outcome_status = "waiting_user"
+                outcome_code = WALL_CLOCK_BUDGET_EXHAUSTED
+                outcome_msg = "run wall-clock budget exhausted"
             except Exception as exc:  # noqa: BLE001 - catch-all for safety
                 outcome_status = "failed"
                 outcome_code = "runtime_error"
@@ -460,6 +477,7 @@ class CareerRunController:
         drive the skill agent loop.
         """
         captured_private = safe_private_context(private_context)
+        retry_counts: dict[tuple[str, str | None], int] = {}
 
         def runner(task_goal: AgentTask | str, params: dict[str, Any]) -> DelegationOutcome:
             event_count = len(event_log.events())
@@ -480,6 +498,23 @@ class CareerRunController:
                     private_context=captured_private,
                 )
             )
+            if outcome.status.value == "retryable" and outcome.error_code:
+                retry_key = (skill, outcome.error_code)
+                retry_counts[retry_key] = retry_counts.get(retry_key, 0) + 1
+                if retry_counts[retry_key] >= 2:
+                    # Repeating the same retryable failure without new
+                    # evidence is no longer productive.  Surface BLOCKED so
+                    # the supervisor asks the user or changes route instead
+                    # of spending the run budget in an identical loop.
+                    outcome = replace(
+                        outcome,
+                        status="blocked",
+                        error_code="delegation_retry_limit",
+                        summary=(
+                            outcome.summary
+                            or f"{skill}: repeated {outcome.error_code or 'retryable'} failure"
+                        ),
+                    )
             # pi-agent-core does not invoke ``after_tool_call`` for legacy
             # terminal tool results.  Record the delegation at this runtime
             # boundary as a fallback, while avoiding duplicates when the hook
@@ -537,8 +572,23 @@ class CareerRunController:
                 error_code=DELEGATION_SKILL_ALREADY_SUCCEEDED,
             )
 
+        # Tailoring is conditionally not applicable when matching produced an
+        # explicit, evidence-bound no-match result.  Treat that as a truthful
+        # terminal outcome for the dependent skill instead of repeatedly
+        # inventing a target JD that does not exist.
+        if skill == "resume-tailoring" and _matching_explicit_no_match(store):
+            state.completed_skills.add(skill)
+            return DelegationOutcome(
+                skill=skill,
+                status="succeeded",
+                summary="匹配结果已明确没有满足约束的岗位，本轮没有可凭证据定制的目标 JD。",
+                refs=store.refs(),
+            )
+
         # Skill-specific evidence prerequisites.
-        if not _skill_has_evidence(skill, store):
+        if not _skill_has_evidence(skill, store) and not (
+            skill == "career-planning" and _role_plan_allowed(task.objective)
+        ):
             return DelegationOutcome(
                 skill=skill,
                 status=_delegation_status_for_error(TARGET_EVIDENCE_NOT_FOUND),
@@ -555,6 +605,14 @@ class CareerRunController:
         )
         ctx.metadata["task_goal"] = task.objective
         ctx.metadata["delegation_task"] = task.to_dict()
+        # Network calls are governed in production: same-domain requests are
+        # serialized, successful pages are reused, and a challenge opens a
+        # cooldown circuit.  Direct unit-tool contexts may omit this flag so
+        # deterministic tests never sleep or share process cache state.
+        ctx.metadata.setdefault("enforce_public_request_governor", True)
+        ctx.metadata.setdefault("public_request_interval_seconds", 2.5)
+        ctx.metadata.setdefault("public_page_cache_ttl_seconds", 6 * 60 * 60)
+        ctx.metadata.setdefault("public_block_cooldown_seconds", 30 * 60)
         def refresh_callback() -> None:
             projection.refresh(ctx.metadata, store)
 
@@ -573,6 +631,8 @@ class CareerRunController:
             halt_box=halt_box,
         )
         skill_hooks.context_refresh_box[0] = refresh_callback
+        if hasattr(child_tracker, "mark_attempt_started"):
+            child_tracker.mark_attempt_started()
         try:
             skill_agent = build_skill_agent(
                 skill,
@@ -590,11 +650,43 @@ class CareerRunController:
 
             # d. Drive the skill agent.
             skill_hooks.agent_ref_box[0] = skill_agent
-            await skill_agent.prompt(task.objective)
+            available_refs = [
+                ref.get("artifact_id", "")
+                for ref in store.refs()
+                if ref.get("artifact_id")
+            ][:12]
+            skill_objective = task.objective
+            if available_refs:
+                skill_objective += (
+                    "\n\n仅可从以下已持久化 evidence refs 中选择 target_artifact_id："
+                    + ", ".join(available_refs)
+                )
+            skill_timeout = (
+                max(0.1, child_tracker.remaining_wall_clock_seconds())
+                if hasattr(child_tracker, "remaining_wall_clock_seconds")
+                else 600.0
+            )
+            await asyncio.wait_for(
+                skill_agent.prompt(skill_objective),
+                timeout=skill_timeout,
+            )
 
             # If a halt fired inside the skill agent → return as error.
             if halt_box[0] is not None:
                 halt_code, halt_msg = halt_box[0]
+                checker = _SKILL_CHECKERS.get(skill)
+                if checker is not None and checker(store):
+                    # A budget/stall signal may arrive after the final tool
+                    # has already persisted a valid deliverable. The durable
+                    # artifact is authoritative; do not discard it merely
+                    # because the model attempted one extra turn.
+                    state.completed_skills.add(skill)
+                    return DelegationOutcome(
+                        skill=skill,
+                        status="succeeded",
+                        summary=_bounded_summary(_last_assistant_text(skill_agent)),
+                        refs=store.refs(),
+                    )
                 return DelegationOutcome(
                     skill=skill,
                     status=_delegation_status_for_error(halt_code),
@@ -617,7 +709,16 @@ class CareerRunController:
                 summary=bounded,
                 refs=refs,
             )
+        except TimeoutError:
+            return DelegationOutcome(
+                skill=skill,
+                status="retryable",
+                error_code=WALL_CLOCK_BUDGET_EXHAUSTED,
+                summary="skill wall-clock budget exhausted",
+            )
         finally:
+            if hasattr(child_tracker, "mark_attempt_finished"):
+                child_tracker.mark_attempt_finished()
             if hooks.context_refresh_box[0] is refresh_callback:
                 hooks.context_refresh_box[0] = None
             if skill_hooks.context_refresh_box[0] is refresh_callback:
@@ -641,8 +742,49 @@ class CareerRunController:
         halt_box: list[tuple[str, str] | None],
     ) -> tuple[str, str | None, str | None]:
         """Determine the attempt outcome after the supervisor driver returns."""
-        # Halt takes precedence.
+        # A stall may fire immediately after the final durable deliverable is
+        # promoted (for example, the supervisor keeps trying to re-delegate
+        # after a planning artifact already completed).  Trusted completion
+        # evidence wins in that narrow case; otherwise the halt remains a
+        # genuine human hand-off.
         if halt_box[0] is not None:
+            halt_code = halt_box[0][0]
+            # Auto-recovery creates fresh agent hooks.  Preserve the trusted
+            # external fact across attempts: once a public source has
+            # explicitly returned an anti-bot/manual-review error, escalating
+            # that same run to ``auto_recovery_limit_reached`` is misleading
+            # and makes the user repeat an already-known handoff.
+            if (
+                halt_code in {
+                    "auto_recovery_limit_reached",
+                    "no_progress",
+                    "route_already_consumed",
+                    "budget_exhausted",
+                    WALL_CLOCK_BUDGET_EXHAUSTED,
+                }
+                and any(
+                    (getattr(event, "payload", {}) or {}).get("error_code")
+                    in {"anti_bot_challenge", "captcha", "login_required", "needs_manual_review"}
+                    for event in event_log.events()
+                )
+            ):
+                return (
+                    "waiting_user",
+                    "anti_bot_challenge",
+                    "public source requires manual review after an observed anti-bot challenge",
+                )
+            if (
+                halt_code in {
+                    "no_progress",
+                    "route_already_consumed",
+                    "delegation_retry_limit",
+                    "budget_exhausted",
+                    WALL_CLOCK_BUDGET_EXHAUSTED,
+                }
+                and state.completed_skills.issuperset(request.needed_skills or ())
+                and store.job_bearing_artifacts()
+            ):
+                return ("succeeded", None, None)
             return ("waiting_user", halt_box[0][0], halt_box[0][1])
 
         # Final assistant message stop_reason check.
@@ -692,6 +834,19 @@ class CareerRunController:
 
         # Run completion policy.
         status, code = RunCompletionPolicy().evaluate(state, store, summary)
+        if (
+            status == "waiting_user"
+            and code == "completion_evidence_unavailable"
+            and state.completed_skills.issuperset(request.needed_skills or ())
+            and store.job_bearing_artifacts()
+        ):
+            # The model may omit a resolvable summary ref after a successful
+            # delegated tool call. Trusted completion artifacts still prove
+            # the requested work; synthesize a bounded audit summary instead
+            # of forcing an unnecessary retry loop.
+            state.summary = summary or "已根据持久化证据完成请求。"
+            state.summary_refs = store.refs()
+            return ("succeeded", None, None)
         return (status, code, None)
 
     # ------------------------------------------------------------------
@@ -790,9 +945,21 @@ def _skill_has_evidence(skill: str, store: EvidenceStore) -> bool:
     if skill == "job-discovery":
         return True  # no prerequisite
     if skill == "job-matching":
-        # Need at least one structured_job_details artifact with real candidates.
+        # Matching can score either structured candidates or a complete public
+        # JD directly (``match_observed_jobs`` has a raw-evidence fallback).
+        # Requiring extraction first made valid static campus/company pages
+        # unusable whenever normalization failed, even though their persisted
+        # visible text was sufficient and provenance-bound.
         for art in store.job_bearing_artifacts():
             if art.artifact_type == "structured_job_details":
+                return True
+            if (
+                art.artifact_type == "public_job_page"
+                and art.quality == "jd_complete"
+                and isinstance(art.content, dict)
+                and isinstance(art.content.get("visible_text"), str)
+                and bool(art.content["visible_text"].strip())
+            ):
                 return True
         return False
     if skill == "resume-tailoring":
@@ -801,6 +968,34 @@ def _skill_has_evidence(skill: str, store: EvidenceStore) -> bool:
     if skill == "career-planning":
         return bool(store.job_bearing_artifacts())
     return True
+
+
+def _matching_explicit_no_match(store: EvidenceStore) -> bool:
+    """Whether a persisted matching report proves no eligible target exists."""
+    for artifact in store.job_bearing_artifacts():
+        if artifact.artifact_type != "job_matching_report":
+            continue
+        content = artifact.content if isinstance(artifact.content, dict) else {}
+        count = content.get("evaluated_candidate_count")
+        if (
+            content.get("no_match_reason") == "no_candidate_satisfied_constraints"
+            and isinstance(count, int)
+            and not isinstance(count, bool)
+            and count >= 0
+        ):
+            return True
+    return False
+
+
+def _role_plan_allowed(task_goal: str) -> bool:
+    """Allow an explicit role-level plan when no employer JD is available."""
+    if not isinstance(task_goal, str) or not task_goal.strip():
+        return False
+    lowered = task_goal.lower()
+    return any(
+        marker in lowered
+        for marker in ("岗位准备计划", "面试准备计划", "求职准备计划", "职业准备计划")
+    )
 
 
 def _last_assistant_text(agent: Any) -> str | None:

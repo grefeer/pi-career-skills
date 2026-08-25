@@ -39,6 +39,27 @@ def _planning_registry() -> CareerToolRegistry:
     return registry
 
 
+def test_role_level_plan_is_explicitly_non_employer_grounded() -> None:
+    result = build_preparation_plan(
+        _context(
+            {
+                "task_goal": "请按 AI 应用开发工程师岗位做面试准备计划",
+                "confirmed_profile_facts": {"skills": ["Python", "RAG"]},
+            }
+        ),
+        BuildPreparationPlanInput(
+            target_artifact_id="role:ai-application-engineer",
+            focus_keywords=["Python", "RAG"],
+        ),
+    )
+    assert result.source_url == "user_goal://role/ai-application-engineer"
+    assert result.plan_items
+    assert all(
+        item.evidence_basis.startswith("user-stated role/profile")
+        for item in result.plan_items
+    )
+
+
 def _evidence(
     *, artifact_id: str = "jd-1", text: str | None = None, title: str = "前端开发工程师"
 ) -> list[dict[str, str]]:
@@ -180,6 +201,36 @@ def test_rejects_target_without_canonical_artifact_id() -> None:
             BuildPreparationPlanInput(target_artifact_id=source_url, focus_keywords=["Vue3"]),
         )
     assert exc_info.value.code == "target_evidence_incomplete"
+
+
+def test_structured_candidate_apply_url_resolves_target_evidence() -> None:
+    """Direct portal extraction may expose apply_url as its only page pointer."""
+    source_url = "https://jobs.example.test/role-apply-only"
+    context = _context(
+        {
+            "structured_job_candidates": [
+                {
+                    "artifact_id": "canonical-apply-only",
+                    "candidate_id": "candidate-apply-only",
+                    "apply_url": source_url,
+                    "title": "AI Agent Engineer",
+                    "responsibilities": "Build production agent workflows.",
+                    "requirements": "Python and RAG experience.",
+                }
+            ],
+            "task_goal": "AI Agent",
+        }
+    )
+
+    result = build_preparation_plan(
+        context,
+        BuildPreparationPlanInput(
+            target_artifact_id="candidate-apply-only", focus_keywords=["Python"]
+        ),
+    )
+
+    assert result.target_artifact_id == "canonical-apply-only"
+    assert result.source_url == source_url
 
 
 @pytest.mark.parametrize(

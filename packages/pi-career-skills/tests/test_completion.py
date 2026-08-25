@@ -263,6 +263,25 @@ def test_tailoring_not_completed_without_actions() -> None:
     assert tailoring_completed(store) is False
 
 
+def test_tailoring_completed_when_matching_explicitly_has_no_eligible_target() -> None:
+    """No-match is a valid not-applicable outcome for dependent tailoring."""
+    store = EvidenceStore()
+    store.add_observation(
+        ToolObservation(
+            tool_name="match-observed-jobs",
+            status="succeeded",
+            output={
+                "source_url": "https://example.com/jobs/search",
+                "content_hash": _make_hash({"no_match": True}),
+                "matches": [],
+                "evaluated_candidate_count": 3,
+                "no_match_reason": "no_candidate_satisfied_constraints",
+            },
+        )
+    )
+    assert tailoring_completed(store) is True
+
+
 # ---------------------------------------------------------------------------
 # RunCompletionPolicy
 # ---------------------------------------------------------------------------

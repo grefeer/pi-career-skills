@@ -45,6 +45,7 @@ from .page_links import (
     _JOB_RESULT_URL_TOKENS,
     _prioritize_direct_search_results,
 )
+from .request_governor import before_request as _govern_before_request
 from .url_guard import PublicFetchError, _assert_public_url
 
 # P2 (B4): known recruiting hosts pass on the loose URL-token OR text-signal
@@ -529,11 +530,17 @@ def search_public_job_pages(
         if not isinstance(attempted, list):
             attempted = []
             context.metadata["public_search_query_hashes"] = attempted
-    route_limit = (
-        _MAX_PUBLIC_SEARCH_ROUTES
-        if context.metadata.get("runtime_auto_search") is True
-        else _MAX_PUBLIC_SEARCH_ROUTES - 1
-    )
+    configured_limit = context.metadata.get("search_route_budget")
+    if isinstance(configured_limit, int) and not isinstance(configured_limit, bool):
+        # The evaluator may grant a bounded extra route to gated aggregators;
+        # direct tool callers retain the historical two-route default.
+        route_limit = max(2, min(configured_limit, 6))
+    else:
+        route_limit = (
+            _MAX_PUBLIC_SEARCH_ROUTES
+            if context.metadata.get("runtime_auto_search") is True
+            else _MAX_PUBLIC_SEARCH_ROUTES - 1
+        )
     if query_hash in attempted or len(attempted) >= route_limit:
         raise PublicFetchError(
             "route_already_consumed",
@@ -560,6 +567,7 @@ def search_public_job_pages(
     }
     source_url = "https://www.bing.com/search?" + urlencode(search_parameters)
     try:
+        _govern_before_request(context, source_url)
         response = requests.get(
             source_url,
             timeout=20,
@@ -606,6 +614,7 @@ def search_public_job_pages(
     if not results:
         fallback_source_url = "https://www.so.com/s?" + urlencode({"q": payload.query})
         try:
+            _govern_before_request(context, fallback_source_url)
             fallback_response = requests.get(
                 fallback_source_url,
                 timeout=20,
@@ -632,6 +641,7 @@ def search_public_job_pages(
             {"keyword": payload.query}
         )
         try:
+            _govern_before_request(context, mobile_source_url)
             mobile_response = requests.get(
                 mobile_source_url,
                 timeout=20,

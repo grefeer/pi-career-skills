@@ -244,6 +244,21 @@ def test_resolve_target_evidence_structured_candidate() -> None:
     assert "前端开发工程师" in result["visible_text"]
 
 
+def test_resolve_target_evidence_recovers_single_candidate_from_stale_pointer() -> None:
+    candidates = [
+        {
+            "candidate_id": "cand1",
+            "artifact_id": "art1",
+            "title": "前端开发工程师",
+            "requirements": "熟悉 Vue3",
+        }
+    ]
+    result = resolve_target_evidence(None, candidates, "stale-model-pointer")
+    assert result is not None
+    assert result["candidate_id"] == "cand1"
+    assert result["artifact_id"] == "art1"
+
+
 def test_resolve_target_evidence_missing_returns_none() -> None:
     assert resolve_target_evidence([], [], "nonexistent") is None
     assert resolve_target_evidence(None, None, "x") is None
