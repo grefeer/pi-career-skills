@@ -392,15 +392,7 @@ class CareerRunController:
                 )
                 if (
                     attempt_added_artifacts <= 0
-                    and outcome_code
-                    in {
-                        "no_progress",
-                        "route_already_consumed",
-                        "target_evidence_not_found",
-                        "target_role_mismatch",
-                        "target_source_mismatch",
-                        "budget_exhausted",
-                    }
+                    and outcome_code == "no_progress"
                 ):
                     if store.job_bearing_artifacts() and not state.summary:
                         state.summary = (

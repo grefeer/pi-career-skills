@@ -47,6 +47,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=90,
         help="Seconds to stagger worker starts",
     )
+    parser.add_argument(
+        "--enable-playwright-fallback",
+        action="store_true",
+        help="Enable Playwright when the HTTP fast path is blocked or empty",
+    )
     return parser.parse_args(argv)
 
 
@@ -151,6 +156,16 @@ def run_cli(argv: list[str] | None = None) -> int:
 
     if workers == 1 or not args.manifest:
         # In-process run for single worker or --ids mode.
+        if args.enable_playwright_fallback:
+            return asyncio.run(
+                _run_in_process(
+                    ids,
+                    question_dir,
+                    out_dir,
+                    args.model,
+                    enable_playwright=True,
+                )
+            )
         return asyncio.run(_run_in_process(ids, question_dir, out_dir, args.model))
 
     # Multi-worker manifest mode: partition + subprocess launch.
@@ -187,6 +202,8 @@ def run_cli(argv: list[str] | None = None) -> int:
             "--model",
             args.model,
         ]
+        if args.enable_playwright_fallback:
+            cmd.append("--enable-playwright-fallback")
         proc = subprocess.Popen(cmd, text=True)
         procs.append(proc)
 
@@ -202,8 +219,15 @@ async def _run_in_process(
     question_dir: Path,
     out_dir: Path,
     model_id: str,
+    *,
+    enable_playwright: bool = False,
 ) -> int:
     """Run a list of ids in-process (deterministic, for single-worker mode)."""
+    if enable_playwright:
+        from ..network.playwright_worker import enable_playwright_fallback
+
+        enable_playwright_fallback(True)
+
     from .chain import run_chain
     from .runner import run_question
 

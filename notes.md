@@ -8,6 +8,7 @@
 - Primary rerun result: 2/10 runtime successes (Q034, R001), 8/10 waiting-user; tool calls fell from 594 to 201. Q144 runtime success had an audit failure caused by a transient candidate target ID; the resume-tailoring adapter now prefers the durable raw-page artifact for canonicalization. A follow-up Q144 live probe stopped at route exhaustion before producing a tailoring artifact, so the provenance fix is verified by tests but not by that live probe.
 - Regression rerun `eval_results/waiting10_regression_20260825_105141`: Q034 and R001 remained `succeeded` with `audit.status=passed`; Q144 was not a valid prior success because its first run audit failed, and its second run stopped before a tailoring artifact was produced.
 - Atomic-contract run `eval_results/waiting10_atomic_20260825_110456`: Q034 and R001 again remained `succeeded` with `audit.status=passed` and lower calls (27→15, 43→24). R025 became a higher-call `no_progress` handoff; investigate as a stochastic route variance before tightening batch visibility.
+- Original-success regression run `eval_results/original_success15_regression_20260825_131228`: only 4/15 remained succeeded. The 11 regressions concentrate on `route_already_consumed` and immediate anti-bot termination; the current route-stop policy is too aggressive when partial evidence exists. Do not treat the atomicity pass as production-ready until this is repaired.
 
 ## Phase 9 evaluation continuation (2026-08-24)
 

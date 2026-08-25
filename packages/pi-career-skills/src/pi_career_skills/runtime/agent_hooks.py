@@ -84,6 +84,14 @@ def _real_discovery_candidate(artifact: Any, candidate: Any) -> bool:
     )
 
 
+def _has_usable_evidence(store: Any) -> bool:
+    """Use partial evidence for routing, while retaining strict completion gates."""
+    method = getattr(store, "usable_evidence_artifacts", None)
+    if callable(method):
+        return bool(method())
+    return bool(store.job_bearing_artifacts())
+
+
 @dataclass
 class ControllerHooks:
     """Hook bundle returned by ``build_controller_hooks``.
@@ -237,15 +245,18 @@ def build_controller_hooks(
                 external_failure_counts["blocked_public_source"] = (
                     external_failure_counts.get("blocked_public_source", 0) + 1
                 )
-                # A challenge/login/manual-review response is a terminal
-                # source hand-off for this route.  Retrying the same public
-                # source only increases blocking risk; the supervisor can
-                # still finish from any already-promoted deliverable.
-                _record_halt(
-                    error_code,
-                    f"{error_code}: public source requires manual review or a fallback source",
-                )
-                external_terminate = True
+                # Keep the route alive while partial evidence exists: the
+                # supervisor may switch to an allowed fallback source. A
+                # repeated block with no usable evidence becomes a hand-off.
+                if (
+                    external_failure_counts["blocked_public_source"] >= 2
+                    and not _has_usable_evidence(store)
+                ):
+                    _record_halt(
+                        error_code,
+                        f"{error_code}: no usable public evidence remains",
+                    )
+                    external_terminate = True
             if not succeeded and error_code in {
                 "route_already_consumed",
                 "wechat_ocr_disabled",
@@ -253,27 +264,15 @@ def build_controller_hooks(
                 external_failure_counts[error_code] = (
                     external_failure_counts.get(error_code, 0) + 1
                 )
-                if external_failure_counts[error_code] >= 2:
+                if (
+                    external_failure_counts[error_code] >= 2
+                    and not _has_usable_evidence(store)
+                ):
                     _record_halt(
                         error_code,
                         f"{error_code}: route exhausted without a productive next step",
                     )
                     external_terminate = True
-                elif (
-                    error_code == "route_already_consumed"
-                    and external_failure_counts.get("blocked_public_source", 0) > 0
-                ):
-                    # A route exhausted after an anti-bot/manual-review
-                    # signal is a genuine human hand-off, even when partial
-                    # artifacts exist. Do not spend recovery budget replaying
-                    # a source that the browser has already identified as
-                    # blocked.
-                    _record_halt(
-                        "anti_bot_challenge",
-                        "public source requires manual review after anti-bot challenge",
-                    )
-                    external_terminate = True
-
             # Repeated evidence/validation misses with no promotion indicate
             # a deterministic mismatch, not a transient network failure.
             if not succeeded and error_code in {

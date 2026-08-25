@@ -33,6 +33,13 @@ The primary rerun reduced total tool calls from **594 to 201** (66.2% reduction)
 - R001 remained `succeeded`, audit passed; calls decreased from 43 to 24.
 - No audit-passed success regressed. R025 used more calls and ended as `no_progress`; this is a waiting-user variance, not a regression of a previously successful question.
 
+## Original-success 15-question regression run (2026-08-25 13:12)
+
+- Output: `eval_results/original_success15_regression_20260825_131228`
+- Baseline: 15/15 runtime successes.
+- Current: 4/15 runtime successes; 11 regressed to `waiting_user`.
+- The dominant new terminal signals are `route_already_consumed` and immediate `anti_bot_challenge` termination. This indicates the route-stop policy is too aggressive when partial evidence already exists. The atomicity metadata itself does not change handlers, but the run should not be accepted until the route policy is relaxed and this 15-question suite returns to the baseline success envelope.
+
 ### 1. Goal boundary and reasoning paradigm
 
 Use a finite Plan-and-Execute route: discover → validate → match/tailor → finalize. A blocked source is a hand-off or fallback decision, not another ReAct retry loop.

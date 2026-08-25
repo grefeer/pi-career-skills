@@ -77,6 +77,12 @@ def build_resume_tailoring_brief(
         payload.target_artifact_id,
     )
     if target is None:
+        target = _select_bounded_fallback_target(
+            context.metadata.get("structured_job_candidates"),
+            context.metadata.get("task_goal"),
+            payload.target_keywords,
+        )
+    if target is None:
         raise ResumeTailoringError(
             "target_evidence_not_found",
             f"target_artifact_id not found; available refs: {_available_refs(context)}",
@@ -223,7 +229,18 @@ def _target_matches_goal(goal: object, searchable: str) -> bool:
         return True
     role_groups = (
         (("产品经理", "产品类", "aigc"), ("产品经理", "aigc")),
-        (("大模型应用开发", "llm 应用", "llm应用"), ("大模型", "应用开发", "llm", "agent")),
+        (
+            (
+                "大模型应用开发",
+                "llm 应用",
+                "llm应用",
+                "ai 应用开发",
+                "ai应用开发",
+                "ai agent",
+                "智能体应用开发",
+            ),
+            ("大模型", "应用开发", "llm", "agent", "智能体"),
+        ),
         (("前端开发",), ("前端", "frontend")),
         (("java 后端", "java后端"), ("java", "后端")),
     )
@@ -260,6 +277,47 @@ def _target_matches_goal(goal: object, searchable: str) -> bool:
                 return True
             return any(term in searchable for term in evidence_terms)
     return True
+
+
+def _select_bounded_fallback_target(
+    candidates: object,
+    goal: object,
+    target_keywords: list[str],
+) -> dict[str, Any] | None:
+    """Select one compatible structured JD when the model pointer is stale.
+
+    This is deliberately a tool-side recovery, not an inference step: only
+    candidates already persisted by discovery are considered, and the winner
+    must contain usable JD text plus at least one requested keyword or an
+    explicit role-family marker.  It prevents a stale model reference from
+    discarding otherwise valid evidence when several pages were collected.
+    """
+    if not isinstance(candidates, list):
+        return None
+    goal_text = goal.lower() if isinstance(goal, str) else ""
+    keyword_text = [value.lower() for value in target_keywords if isinstance(value, str)]
+    scored: list[tuple[int, dict[str, Any]]] = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        text = _candidate_section_text(candidate)
+        if not text:
+            continue
+        searchable = text.lower()
+        if not _target_matches_goal(goal, searchable):
+            continue
+        keyword_hits = sum(1 for keyword in keyword_text if keyword in searchable)
+        role_hits = sum(
+            marker in searchable
+            for marker in ("ai", "大模型", "llm", "agent", "智能体", "应用开发")
+            if marker in goal_text
+        )
+        if keyword_hits or role_hits:
+            scored.append((keyword_hits * 10 + role_hits, candidate))
+    if not scored:
+        return None
+    scored.sort(key=lambda item: (-item[0], str(item[1].get("artifact_id", ""))))
+    return scored[0][1]
 
 
 def _source_attribution(source_url: str, job_text: str) -> str | None:

@@ -389,6 +389,24 @@ class EvidenceStore:
         with self._lock:
             return [a for a in self._artifacts if _is_quality_job_bearing(a)]
 
+    def usable_evidence_artifacts(self) -> list[Artifact]:
+        """Return persisted non-shell evidence, including partial JDs.
+
+        A partially parsed job page is not sufficient for final completion,
+        but it is sufficient to keep an anti-bot/route handoff alive while the
+        agent tries another source.  Separating this softer signal from
+        ``job_bearing_artifacts`` avoids both premature termination and weak
+        evidence being accepted as a completed deliverable.
+        """
+        with self._lock:
+            return [
+                artifact
+                for artifact in self._artifacts
+                if artifact.artifact_type
+                in {"public_job_page", "structured_job_details", "job_search_results"}
+                and bool(artifact.content)
+            ]
+
     def get(self, artifact_id: str) -> Artifact | None:
         """Look up an artifact by id, or ``None``."""
         with self._lock:

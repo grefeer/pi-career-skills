@@ -511,7 +511,16 @@ def _target_matches_goal(goal: object, searchable: str) -> bool:
         )
     ):
         return False
-    if "ai 应用开发" in lowered_goal or "ai应用开发" in lowered_goal:
+    if any(
+        marker in lowered_goal
+        for marker in (
+            "ai 应用开发",
+            "ai应用开发",
+            "ai agent",
+            "ai智能体",
+            "智能体应用开发",
+        )
+    ):
         return any(marker in searchable for marker in ("ai", "人工智能", "大模型", "llm")) and any(
             marker in searchable
             for marker in ("应用开发", "应用研发", "应用工程师", "开发工程师", "研发工程师", "后端工程师", "前端工程师", "开发实习", "研发实习", "developer", "engineer")

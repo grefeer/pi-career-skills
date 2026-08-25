@@ -35,9 +35,10 @@ def _ctx(error_code: str, name: str = "fetch-public-job-page") -> dict[str, obje
     }
 
 
-def test_anti_bot_stops_route_immediately() -> None:
+def test_repeated_anti_bot_stops_route_without_artifacts() -> None:
     hooks, halt_box = _hooks()
 
+    assert hooks.after_tool_call(_ctx("anti_bot_challenge")) is None
     signal = hooks.after_tool_call(_ctx("anti_bot_challenge"))
 
     assert signal == {"terminate": True}
