@@ -14,8 +14,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from pi_agent_core import Agent, AgentOptions, AgentTool
-from pi_ai import Model
+from pi_agent_core import Agent, AgentMessage, AgentOptions, AgentTool, ToolExecutionMode
+from pi_ai import Model, TextContent, UserMessage
 
 from .tools import create_all_tools, create_coding_tools
 
@@ -25,6 +25,16 @@ DEFAULT_SYSTEM_PROMPT = (
     "run bash commands, and search code. Always use the provided tools to "
     "accomplish tasks. Be concise and precise."
 )
+
+
+def _as_user_message(message: str | AgentMessage) -> AgentMessage:
+    """Normalize a plain string (or passthrough a built message) for queueing."""
+    if isinstance(message, str):
+        return UserMessage(
+            content=[TextContent(text=message)],
+            timestamp=int(asyncio.get_event_loop().time() * 1000),
+        )
+    return message
 
 
 class CodingAgent:
@@ -46,6 +56,12 @@ class CodingAgent:
         tools: list[AgentTool] | None = None,
         tool_names: list[str] | None = None,
         thinking_level: str | None = None,
+        tool_execution: ToolExecutionMode = "parallel",
+        stream_fn: Any = None,
+        get_api_key: Any = None,
+        before_tool_call: Any = None,
+        after_tool_call: Any = None,
+        should_stop_after_turn: Any = None,
     ) -> None:
         self._cwd = cwd
         # 工具集
@@ -57,7 +73,9 @@ class CodingAgent:
         else:
             agent_tools = create_coding_tools(cwd)
 
-        get_api_key = (lambda p: api_key) if api_key else None
+        # 显式传入的 get_api_key 回调优先；否则沿用 api_key 简写。
+        if get_api_key is None and api_key:
+            get_api_key = lambda p: api_key  # noqa: E731
         self._agent = Agent(
             AgentOptions(
                 initial_state={
@@ -67,7 +85,11 @@ class CodingAgent:
                     "thinking_level": thinking_level,
                 },
                 get_api_key=get_api_key,
-                tool_execution="parallel",
+                tool_execution=tool_execution,
+                stream_fn=stream_fn,
+                before_tool_call=before_tool_call,
+                after_tool_call=after_tool_call,
+                should_stop_after_turn=should_stop_after_turn,
             )
         )
 
@@ -91,27 +113,13 @@ class CodingAgent:
         """从当前上下文继续。"""
         await self._agent.continue_()
 
-    def steer(self, message: str) -> None:
-        """工作中注入指令。"""
-        from pi_ai import TextContent, UserMessage
+    def steer(self, message: str | AgentMessage) -> None:
+        """工作中注入指令。接受纯文本或已构造的 ``AgentMessage``。"""
+        self._agent.steer(_as_user_message(message))
 
-        self._agent.steer(
-            UserMessage(
-                content=[TextContent(text=message)],
-                timestamp=int(asyncio.get_event_loop().time() * 1000),
-            )
-        )
-
-    def follow_up(self, message: str) -> None:
-        """完成后追加消息。"""
-        from pi_ai import TextContent, UserMessage
-
-        self._agent.follow_up(
-            UserMessage(
-                content=[TextContent(text=message)],
-                timestamp=int(asyncio.get_event_loop().time() * 1000),
-            )
-        )
+    def follow_up(self, message: str | AgentMessage) -> None:
+        """完成后追加消息。接受纯文本或已构造的 ``AgentMessage``。"""
+        self._agent.follow_up(_as_user_message(message))
 
     def abort(self) -> None:
         self._agent.abort()

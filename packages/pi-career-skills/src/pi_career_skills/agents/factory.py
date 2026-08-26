@@ -1,5 +1,9 @@
 """Supervisor + per-delegation skill agents (migration plan §4.2).
 
+Both agent kinds are built on the shared ``pi_coding_agent.CodingAgent``
+SDK wrapper (over ``pi_agent_core.Agent``), always with
+``tool_execution="sequential"`` and the controller hooks wired through.
+
 The supervisor sees ONLY the four ``delegate-<skill>`` tools; the business
 tools are never granted to it (tool_adapter re-checks skill isolation as
 defense in depth anyway).  Each delegation runs a FRESH skill agent with
@@ -14,8 +18,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from pi_agent_core import Agent, AgentOptions, AgentState
 from pi_ai import Model
+from pi_coding_agent import CodingAgent
 
 from ..context import ToolContext
 from ..registry import CareerToolRegistry, build_career_tool_registry
@@ -57,8 +61,12 @@ def build_supervisor_agent(
     before_tool_call: Any = None,
     after_tool_call: Any = None,
     should_stop_after_turn: Any = None,
-) -> Agent:
+) -> CodingAgent:
     """Build the supervisor agent with delegation tools for allowed skills.
+
+    The agent is a ``pi_coding_agent.CodingAgent`` (the shared SDK wrapper
+    over ``pi_agent_core.Agent``) with ``tool_execution="sequential"`` and
+    the controller hooks wired through.
 
     When ``allowed_skills`` is ``None`` (default), all four skills are
     exposed — identical to the historical behavior.  Otherwise only the
@@ -84,20 +92,16 @@ def build_supervisor_agent(
     else:
         tools = [make_delegation_tool(s, runner) for s in skills]
 
-    return Agent(
-        AgentOptions(
-            initial_state=AgentState(
-                system_prompt=SUPERVISOR_PROMPT,
-                model=model,
-                tools=tools,
-            ),
-            tool_execution="sequential",
-            stream_fn=stream_fn,
-            get_api_key=get_api_key,
-            before_tool_call=before_tool_call,
-            after_tool_call=after_tool_call,
-            should_stop_after_turn=should_stop_after_turn,
-        )
+    return CodingAgent(
+        model=model,
+        system_prompt=SUPERVISOR_PROMPT,
+        tools=tools,
+        tool_execution="sequential",
+        stream_fn=stream_fn,
+        get_api_key=get_api_key,
+        before_tool_call=before_tool_call,
+        after_tool_call=after_tool_call,
+        should_stop_after_turn=should_stop_after_turn,
     )
 
 
@@ -112,8 +116,12 @@ def build_skill_agent(
     before_tool_call: Any = None,
     after_tool_call: Any = None,
     should_stop_after_turn: Any = None,
-) -> Agent:
+) -> CodingAgent:
     """Build a fresh skill agent scoped to *skill_name*'s own tools only.
+
+    The agent is a ``pi_coding_agent.CodingAgent`` (the shared SDK wrapper
+    over ``pi_agent_core.Agent``) with ``tool_execution="sequential"`` and
+    the controller hooks wired through.
 
     When ``registry`` is given, catalog names are resolved from it instead of
     the module-level ``_REGISTRY`` (useful for hermetic tests with stub handlers).
@@ -139,22 +147,18 @@ def build_skill_agent(
         for name in CAPABILITY_REGISTRY[skill_name].tool_names
         if (definition := reg.get(name)) is not None
     ]
-    return Agent(
-        AgentOptions(
-            initial_state=AgentState(
-                system_prompt=load_archived_skill_prompt(
-                    skill_name, _SKILL_PROMPTS[skill_name]
-                ),
-                model=model,
-                tools=tools,
-            ),
-            tool_execution="sequential",
-            stream_fn=stream_fn,
-            get_api_key=get_api_key,
-            before_tool_call=before_tool_call,
-            after_tool_call=after_tool_call,
-            should_stop_after_turn=should_stop_after_turn,
-        )
+    return CodingAgent(
+        model=model,
+        system_prompt=load_archived_skill_prompt(
+            skill_name, _SKILL_PROMPTS[skill_name]
+        ),
+        tools=tools,
+        tool_execution="sequential",
+        stream_fn=stream_fn,
+        get_api_key=get_api_key,
+        before_tool_call=before_tool_call,
+        after_tool_call=after_tool_call,
+        should_stop_after_turn=should_stop_after_turn,
     )
 
 

@@ -8,6 +8,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pi-py-ai",
     "pi-py-agent-core",
+    "pi-py-coding-agent",
     "pydantic>=2",
     "requests>=2.31",
     "pyyaml>=6",

@@ -18,8 +18,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any
 
-from pi_agent_core import Agent
 from pi_ai import AssistantMessage, Model, ToolResultMessage
+from pi_coding_agent import CodingAgent
 
 from ..agents.capabilities import CAPABILITY_REGISTRY
 from ..agents.contracts import AgentTask
@@ -763,7 +763,7 @@ class CareerRunController:
         store: EvidenceStore,
         tracker: BudgetTracker,
         guard: ToolCallGuard,
-        supervisor: Agent,
+        supervisor: CodingAgent,
         request: RunRequest,
         event_log: EventLogger,
         attempt_id: str,
