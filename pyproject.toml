@@ -17,6 +17,8 @@ dependencies = [
     "pi-py-coding-agent",
     "pi-py-server",
     "pi-py-career-skills",
+    "playwright>=1.62.0",
+    "pypdf>=6.16.2",
 ]
 
 # ---- 开发依赖(质量工具 + 测试), 所有子包共享 ----
