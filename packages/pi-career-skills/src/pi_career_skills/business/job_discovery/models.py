@@ -356,6 +356,121 @@ class SearchPublicJobPagesOutput(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# browse-public-job-page
+# ---------------------------------------------------------------------------
+
+
+class BrowsePublicJobPageInput(BaseModel):
+    """A public career URL to open in a headless browser and interact with.
+
+    ``mode`` selects how deep the automation goes (all modes stay within the
+    same security envelope: public URLs only, no login, no anti-bot bypass):
+      - "render":    stable-text render (same as the fetch fallback path);
+      - "load-all":  aggressive scroll + "load more"/"show all" clicks for
+                     infinite-scroll / collapsed list pages;
+      - "paginate":  render page 1, then jump pages 2..N via the detected
+                     URL page pattern (query / offset / path);
+      - "interact":  click through up to ``max_cards`` job cards and collect
+                     each detail (drawer panels / navigation / go-back).
+
+    Use this tool when ``fetch-public-job-page`` returns a ``js_shell`` or
+    ``list_only`` page that needs in-browser interaction to become a full JD.
+    """
+
+    url: str = Field(min_length=1, max_length=2_048)
+    mode: Literal["render", "load-all", "paginate", "interact"] = "render"
+    pages: int = Field(default=3, ge=1, le=5)
+    max_cards: int = Field(default=5, ge=1, le=12)
+    wait_ms: int = Field(default=1_500, ge=200, le=10_000)
+
+    @field_validator("url")
+    @classmethod
+    def normalize_url(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("url must not be empty")
+        return cleaned
+
+
+class BrowsePublicJobPageOutput(FetchPublicJobPageOutput):
+    """Evidence page + the automation steering signals the run-scoped agent
+    needs to decide what to do next (how many cards were visible, whether the
+    site paginates, which strategy was used, and any warnings)."""
+
+    cards_visible: int | None = None
+    estimated_total_items: int | None = None
+    pagination_pattern: Literal["query", "offset", "path"] | None = None
+    strategy: Literal["render", "load_all", "url_jump", "interact", "single"] | None = None
+    strategy_detail: str | None = None
+    pages_collected: int | None = None
+    warning: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# search-job-site
+# ---------------------------------------------------------------------------
+
+
+class SearchJobSiteInput(BaseModel):
+    """Search a career site's own in-site search box for a job keyword.
+
+    Distinct from ``search-public-job-pages`` (external web search): this
+    drives the site's native search UI in a headless browser, so results come
+    from the site's own index.  Use when a known list page or career portal
+    has a search box and the target role needs filtering in place.
+    """
+
+    url: str = Field(min_length=1, max_length=2_048)
+    query: str = Field(min_length=1, max_length=80)
+    max_cards: int = Field(default=5, ge=1, le=12)
+
+    @field_validator("url")
+    @classmethod
+    def normalize_url(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("url must not be empty")
+        return cleaned
+
+    @field_validator("query")
+    @classmethod
+    def normalize_query(cls, value: str) -> str:
+        cleaned = " ".join(value.split())
+        if not cleaned:
+            raise ValueError("query must not be empty")
+        return cleaned
+
+
+class SearchJobSiteOutput(BaseModel):
+    """The post-search page state plus evidence fields, so the result is
+    immediately usable as an evidence artifact for extraction.
+
+    ``search_ok=False`` (e.g. no search box found) still returns the rendered
+    page text — a truthful, usable fallback rather than a silent failure.
+    """
+
+    url: str
+    query: str
+    effective_url: str | None = None
+    search_ok: bool
+    search_detail: str | None = None
+    pre_search_card_count: int | None = None
+    post_search_card_count: int | None = None
+    result_indicator: str | None = None
+    warning: str | None = None
+    # Evidence fields (may be null when the render itself failed downstream).
+    artifact_id: str | None = None
+    source_url: str | None = None
+    content_hash: str | None = None
+    visible_text: str = ""
+    title: str | None = None
+    http_status: int | None = None
+    quality: Literal["jd_complete", "list_only", "js_shell", "empty"] | None = None
+    quality_signal: str | None = None
+    detail_links: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # extract-observed-job-details / batch
 # ---------------------------------------------------------------------------
 

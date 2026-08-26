@@ -39,6 +39,8 @@ from .business.job_discovery.handlers import (
     validate_observed_candidates,
 )
 from .business.job_discovery.models import (
+    BrowsePublicJobPageInput,
+    BrowsePublicJobPageOutput,
     ClassifyJobUrlInput,
     ClassifyJobUrlOutput,
     DeduplicateObservedJobsInput,
@@ -55,6 +57,8 @@ from .business.job_discovery.models import (
     FetchWechatArticleOutput,
     QueryCareerSheetRecordsInput,
     QueryCareerSheetRecordsOutput,
+    SearchJobSiteInput,
+    SearchJobSiteOutput,
     SearchPublicJobPagesInput,
     SearchPublicJobPagesOutput,
     ValidateObservedCandidatesInput,
@@ -87,6 +91,8 @@ TOOL_ARTIFACT_TYPE: dict[str, str] = {
     "fetch-public-job-pages": "public_job_page",
     "fetch-public-job-page": "public_job_page",
     "fetch-wechat-article": "public_job_page",
+    "browse-public-job-page": "public_job_page",
+    "search-job-site": "public_job_page",
     "search-public-job-pages": "job_search_results",
     "query-career-sheet-records": "job_search_results",
     "extract-observed-job-details": "structured_job_details",
@@ -133,6 +139,18 @@ TOOL_CONTRACTS: dict[str, ToolContract] = {
         side_effects=frozenset({"network", "ocr", "write_run_artifact"}),
         max_items=1,
         fallback_route="fetch-public-job-page",
+    ),
+    "browse-public-job-page": ToolContract(
+        granularity="composite",
+        side_effects=frozenset({"network", "write_run_artifact"}),
+        max_items=1,
+        fallback_route="fetch-public-job-page",
+    ),
+    "search-job-site": ToolContract(
+        granularity="source_query",
+        side_effects=frozenset({"network", "write_run_artifact"}),
+        max_items=20,
+        fallback_route="search-public-job-pages",
     ),
     "search-public-job-pages": ToolContract(
         granularity="source_query",
@@ -391,6 +409,50 @@ def build_career_tool_registry() -> CareerToolRegistry:
             description=(
                 "抓取一页公开招聘页面并生成带来源、内容哈希和质量分级的证据；"
                 "quality=js_shell/empty 时不得作为完整 JD 交付。"
+            ),
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="browse-public-job-page",
+            skill_name="job-discovery",
+            input_model=BrowsePublicJobPageInput,
+            output_model=BrowsePublicJobPageOutput,
+            handler=network_handlers.browse_public_job_page,
+            is_deliverable=True,
+            artifact_type=TOOL_ARTIFACT_TYPE["browse-public-job-page"],
+            description=(
+                "在无头浏览器中打开一个公开招聘 URL 并与页面交互，返回完整证据页"
+                "（与 fetch-public-job-page 同款分类/规范化契约）外加导航信号："
+                "cards_visible 可见卡片数、estimated_total_items 总数估计、"
+                "pagination_pattern 站点分页方式（query/offset/path）、strategy 与 "
+                "strategy_detail 实际使用的策略、pages_collected 采集页数、warning。"
+                "mode=render 稳定渲染；mode=load-all 滚动+点击\"加载更多/查看全部\"；"
+                "mode=paginate 按检测到的 URL 分页模式跳转 2..N 页；mode=interact "
+                "点击最多 max_cards 张职位卡片并收集各自详情。当 fetch-public-job-page "
+                "返回 js_shell 或 list_only、需要浏览器内交互（抽屉/翻页/加载更多）才能"
+                "得到完整 JD 时使用本工具。所有模式均在公开网络安全边界内：不登录、不"
+                "绕过反爬；遇到验证码/登录墙/微信验证等安全门时拒绝交互并如实失败。"
+            ),
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="search-job-site",
+            skill_name="job-discovery",
+            input_model=SearchJobSiteInput,
+            output_model=SearchJobSiteOutput,
+            handler=network_handlers.search_job_site,
+            is_deliverable=True,
+            artifact_type=TOOL_ARTIFACT_TYPE["search-job-site"],
+            description=(
+                "在招聘站自带的站内搜索框输入关键词并触发搜索，返回搜索后的页面证据"
+                "（带 artifact_id/source_url/content_hash/quality，可直接进入提取）"
+                "与搜索诊断：search_ok 是否找到搜索框、pre/post_search_card_count "
+                "搜索前后可见卡片数、result_indicator 结果计数文案、warning（搜索前后"
+                "卡片数相同且数量多时提示疑似客户端假过滤，结果可能不完整）。与 "
+                "search-public-job-pages（外部网页搜索）不同：本工具检索的是站点自身"
+                "索引。当已知列表页/门户有明显搜索框、需要在站内过滤目标岗位时使用。"
             ),
         )
     )

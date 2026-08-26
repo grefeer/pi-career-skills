@@ -156,6 +156,13 @@ Condensed mode list:
 | `search-interact` | Moka/zhiye/Feishu: search-filter then click each card for full JDs |
 | `list` / `detail` / `interact` / `search` / `click` | See `references/browse-modes.md` |
 
+**本项目没有 `scripts/browse.py` CLI。** 上述浏览器模式在本项目中是注册工具：
+`browse-public-job-page`（mode=`render` / `load-all` / `paginate` / `interact`）与
+`search-job-site`（站点自带搜索框）。`parallel-fetch` 的 URL 分页收集由
+`fetch-public-job-pages` 内建（服务器渲染列表自动收集兄弟页），`search-interact`
+对应 `browse-public-job-page` + `search-job-site`。不要执行任何 `scripts/browse.py`
+命令；完整说明见 `references/browse-modes.md`。
+
 ### Phase 4 - STRUCTURE: LLM extracts normalized JDs
 
 This is your core contribution as the LLM orchestrator. Read the page text and
@@ -229,7 +236,7 @@ python scripts/crawl.py --site liepin --keyword "AI" --max-pages 3   # logged-in
 Load these as needed during processing:
 
 - `references/single-url-extraction.md` - **L2 workflow**: Planner -> Executor -> Verifier for one career URL (parallel-fetch first)
-- `references/browse-modes.md` - Full `browse.py` mode reference (list/detail/interact/search/search-interact/parallel-fetch/click)
+- `references/browse-modes.md` - 浏览器交互模式参考：browse-public-job-page（render/load-all/paginate/interact）+ search-job-site（站内搜索）+ 引导信号 + URL 分页收集
 - `references/site-catalog.md` - Known career site patterns, selectors, and quirks
 - `references/extraction-guide.md` - Detailed JD extraction rules with examples
 - `references/schema.md` - Full NormalizedJobCandidate JSON schema

@@ -30,10 +30,7 @@ from pi_career_skills.evaluation.seed_urls import (
     resolve_seed_urls,
 )
 
-SOURCE_ROOT = Path(
-    r"d:\Program Files\JetBrains\PyCharm Community Edition 2024.2.2"
-    r"\proj\langgraph-multi-agent-career-assistant-main"
-)
+SOURCE_ROOT = Path(r"d:\Python\langgraph-multi-agent-career-assistant-main")
 MANIFEST_PATH = SOURCE_ROOT / "tests" / "question" / "redesign" / "manifest.json"
 
 manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))

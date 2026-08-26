@@ -11,10 +11,7 @@ from pi_career_skills.evaluation.profile_facts import build_profile_facts
 # Helper — load sample profiles from source question files
 # ---------------------------------------------------------------------------
 
-SOURCE_ROOT = Path(
-    r"d:\Program Files\JetBrains\PyCharm Community Edition 2024.2.2"
-    r"\proj\langgraph-multi-agent-career-assistant-main"
-)
+SOURCE_ROOT = Path(r"d:\Python\langgraph-multi-agent-career-assistant-main")
 QUESTION_DIR = SOURCE_ROOT / "tests" / "question" / "redesign"
 
 

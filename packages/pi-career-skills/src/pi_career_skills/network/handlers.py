@@ -14,7 +14,12 @@ from ``skill/job_discovery/runtime/*``:
 - ``fetch_wechat_article``    -> :mod:`.wechat` (OCR pipeline, gated off by
   default);
 - ``classify_job_url``        -> :mod:`.classify_url` (4KB probe site
-  classification).
+  classification);
+- ``browse_public_job_page``  -> :mod:`.browse` (headless-browser interaction:
+  load-all / paginate / card click-through, consent hard gates, steering
+  signals);
+- ``search_job_site``         -> :mod:`.browse` (drive the site's own in-site
+  search box and return the post-search page as evidence).
 
 Signatures follow the shared handler contract ``(context, input) -> output``,
 so the registry wiring is unchanged from the fail-closed stubs.
@@ -23,6 +28,7 @@ so the registry wiring is unchanged from the fail-closed stubs.
 from __future__ import annotations
 
 from .batch_fetch import fetch_public_job_pages
+from .browse import browse_public_job_page, search_job_site
 from .career_sheets import query_career_sheet_records
 from .classify_url import classify_job_url
 from .page_fetch import fetch_public_job_page
@@ -36,4 +42,6 @@ __all__ = [
     "query_career_sheet_records",
     "fetch_wechat_article",
     "classify_job_url",
+    "browse_public_job_page",
+    "search_job_site",
 ]

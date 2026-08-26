@@ -1,6 +1,6 @@
 {
   "schema_version": "pi_contract_v1",
-  "tool_count": 13,
+  "tool_count": 15,
   "tools": [
     {
       "name": "extract-observed-job-details-batch",
@@ -2531,6 +2531,501 @@
           "plan_items"
         ],
         "title": "CareerPreparationPlanOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "browse-public-job-page",
+      "skill_name": "job-discovery",
+      "is_deliverable": true,
+      "artifact_type": "public_job_page",
+      "description": "在无头浏览器中打开一个公开招聘 URL 并与页面交互，返回完整证据页（与 fetch-public-job-page 同款分类/规范化契约）外加导航信号：cards_visible 可见卡片数、estimated_total_items 总数估计、pagination_pattern 站点分页方式（query/offset/path）、strategy 与 strategy_detail 实际使用的策略、pages_collected 采集页数、warning。mode=render 稳定渲染；mode=load-all 滚动+点击\"加载更多/查看全部\"；mode=paginate 按检测到的 URL 分页模式跳转 2..N 页；mode=interact 点击最多 max_cards 张职位卡片并收集各自详情。当 fetch-public-job-page 返回 js_shell 或 list_only、需要浏览器内交互（抽屉/翻页/加载更多）才能得到完整 JD 时使用本工具。所有模式均在公开网络安全边界内：不登录、不绕过反爬；遇到验证码/登录墙/微信验证等安全门时拒绝交互并如实失败。",
+      "input_model": {
+        "description": "A public career URL to open in a headless browser and interact with.\n\n``mode`` selects how deep the automation goes (all modes stay within the\nsame security envelope: public URLs only, no login, no anti-bot bypass):\n  - \"render\":    stable-text render (same as the fetch fallback path);\n  - \"load-all\":  aggressive scroll + \"load more\"/\"show all\" clicks for\n                 infinite-scroll / collapsed list pages;\n  - \"paginate\":  render page 1, then jump pages 2..N via the detected\n                 URL page pattern (query / offset / path);\n  - \"interact\":  click through up to ``max_cards`` job cards and collect\n                 each detail (drawer panels / navigation / go-back).\n\nUse this tool when ``fetch-public-job-page`` returns a ``js_shell`` or\n``list_only`` page that needs in-browser interaction to become a full JD.",
+        "properties": {
+          "url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          },
+          "mode": {
+            "default": "render",
+            "enum": [
+              "render",
+              "load-all",
+              "paginate",
+              "interact"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "pages": {
+            "default": 3,
+            "maximum": 5,
+            "minimum": 1,
+            "title": "Pages",
+            "type": "integer"
+          },
+          "max_cards": {
+            "default": 5,
+            "maximum": 12,
+            "minimum": 1,
+            "title": "Max Cards",
+            "type": "integer"
+          },
+          "wait_ms": {
+            "default": 1500,
+            "maximum": 10000,
+            "minimum": 200,
+            "title": "Wait Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "BrowsePublicJobPageInput",
+        "type": "object"
+      },
+      "output_model": {
+        "description": "Evidence page + the automation steering signals the run-scoped agent\nneeds to decide what to do next (how many cards were visible, whether the\nsite paginates, which strategy was used, and any warnings).",
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "visible_text": {
+            "title": "Visible Text",
+            "type": "string"
+          },
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "effective_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Effective Url"
+          },
+          "redirect_chain": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Redirect Chain",
+            "type": "array"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Http Status"
+          },
+          "quality": {
+            "anyOf": [
+              {
+                "enum": [
+                  "jd_complete",
+                  "list_only",
+                  "js_shell",
+                  "empty"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Quality"
+          },
+          "quality_signal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Quality Signal"
+          },
+          "detail_links": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Detail Links",
+            "type": "array"
+          },
+          "cards_visible": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cards Visible"
+          },
+          "estimated_total_items": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Estimated Total Items"
+          },
+          "pagination_pattern": {
+            "anyOf": [
+              {
+                "enum": [
+                  "query",
+                  "offset",
+                  "path"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pagination Pattern"
+          },
+          "strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "render",
+                  "load_all",
+                  "url_jump",
+                  "interact",
+                  "single"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Strategy"
+          },
+          "strategy_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Strategy Detail"
+          },
+          "pages_collected": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pages Collected"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Warning"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "source_url",
+          "title",
+          "visible_text",
+          "content_hash"
+        ],
+        "title": "BrowsePublicJobPageOutput",
+        "type": "object"
+      }
+    },
+    {
+      "name": "search-job-site",
+      "skill_name": "job-discovery",
+      "is_deliverable": true,
+      "artifact_type": "public_job_page",
+      "description": "在招聘站自带的站内搜索框输入关键词并触发搜索，返回搜索后的页面证据（带 artifact_id/source_url/content_hash/quality，可直接进入提取）与搜索诊断：search_ok 是否找到搜索框、pre/post_search_card_count 搜索前后可见卡片数、result_indicator 结果计数文案、warning（搜索前后卡片数相同且数量多时提示疑似客户端假过滤，结果可能不完整）。与 search-public-job-pages（外部网页搜索）不同：本工具检索的是站点自身索引。当已知列表页/门户有明显搜索框、需要在站内过滤目标岗位时使用。",
+      "input_model": {
+        "description": "Search a career site's own in-site search box for a job keyword.\n\nDistinct from ``search-public-job-pages`` (external web search): this\ndrives the site's native search UI in a headless browser, so results come\nfrom the site's own index.  Use when a known list page or career portal\nhas a search box and the target role needs filtering in place.",
+        "properties": {
+          "url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          },
+          "query": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          },
+          "max_cards": {
+            "default": 5,
+            "maximum": 12,
+            "minimum": 1,
+            "title": "Max Cards",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "url",
+          "query"
+        ],
+        "title": "SearchJobSiteInput",
+        "type": "object"
+      },
+      "output_model": {
+        "description": "The post-search page state plus evidence fields, so the result is\nimmediately usable as an evidence artifact for extraction.\n\n``search_ok=False`` (e.g. no search box found) still returns the rendered\npage text — a truthful, usable fallback rather than a silent failure.",
+        "properties": {
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "effective_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Effective Url"
+          },
+          "search_ok": {
+            "title": "Search Ok",
+            "type": "boolean"
+          },
+          "search_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Search Detail"
+          },
+          "pre_search_card_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pre Search Card Count"
+          },
+          "post_search_card_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Post Search Card Count"
+          },
+          "result_indicator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Result Indicator"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Warning"
+          },
+          "artifact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Artifact Id"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Url"
+          },
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content Hash"
+          },
+          "visible_text": {
+            "default": "",
+            "title": "Visible Text",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Title"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Http Status"
+          },
+          "quality": {
+            "anyOf": [
+              {
+                "enum": [
+                  "jd_complete",
+                  "list_only",
+                  "js_shell",
+                  "empty"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Quality"
+          },
+          "quality_signal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Quality Signal"
+          },
+          "detail_links": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Detail Links",
+            "type": "array"
+          }
+        },
+        "required": [
+          "url",
+          "query",
+          "search_ok"
+        ],
+        "title": "SearchJobSiteOutput",
         "type": "object"
       }
     }

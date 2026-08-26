@@ -31,6 +31,7 @@ from ..business.common.batch_progress import run_parallel_with_progress
 from ..business.job_discovery.models import (
     _JD_MARKER_SCAN_HEAD_CHARS,
     _JD_SECTION_MARKERS,
+    _MIN_USABLE_TEXT_CHARS,
     FetchPublicJobPageOutput,
     FetchPublicJobPagesInput,
     FetchPublicJobPagesOutput,
@@ -69,6 +70,9 @@ _MAX_LIST_EXPANSION = 5
 _CAMPUS_PORTAL_HOST = "career.hebut.edu.cn"
 _MAX_CAMPUS_INDEX_PAGES = 2
 _MAX_CAMPUS_DETAIL_PAGES = 20
+# P1: how many total pages (page 1 + siblings) to collect from a
+# server-rendered, URL-paginated list page before expanding its detail links.
+_MAX_PAGINATION_PAGES = 3
 
 _IGUOPIN_LIST_HOSTS = frozenset({"iguopin.com", "www.iguopin.com"})
 _IGUOPIN_API_ORIGIN = "https://gp-api.iguopin.com"
@@ -369,6 +373,74 @@ def _expand_official_campus_detail(
     return expanded
 
 
+def _merge_detail_links(*groups: list[str]) -> list[str]:
+    """Union detail-link groups, preserving order and dropping duplicates."""
+    seen: set[str] = set()
+    merged: list[str] = []
+    for group in groups:
+        for link in group:
+            if link not in seen:
+                seen.add(link)
+                merged.append(link)
+    return merged
+
+
+def _pagination_sibling_pages(
+    url: str,
+    first_body: str,
+    *,
+    pages: int = _MAX_PAGINATION_PAGES,
+) -> tuple[list[FetchPublicJobPageOutput], list[str]]:
+    """Fetch pages 2..N of a server-rendered, URL-paginated list page (P1).
+
+    Only runs when the seed URL itself already carries a detectable page
+    pattern (``?page=2`` / ``?offset=20&limit=10`` / ``/page/3/``) AND page 1
+    is a list page, not a single JD (the JD-marker head scan, identical to
+    ``_expand_from_list_links``) — a JD detail page must never be paginated.
+
+    Returns ``(sibling_page_evidence, unioned_detail_links)``.  The unioned
+    links feed the normal bounded list expansion so detail pages beyond
+    page 1 are covered without recursing into expansion again.  Early-stops
+    when a page fetch fails or a page duplicates the previous one (a list
+    that redirects every page to page 1, or ends after page N).
+    """
+    pattern = playwright_worker._detect_url_page_pattern(url)
+    if pattern is None:
+        return [], []
+    if _url_shape_quality_override(url) != "list_only" and any(
+        marker.lower() in first_body[:_JD_MARKER_SCAN_HEAD_CHARS].lower()
+        for marker in _JD_SECTION_MARKERS
+    ):
+        return [], []
+    siblings: list[FetchPublicJobPageOutput] = []
+    extra_links: list[str] = []
+    first_text = first_body.strip()
+    for page_number in range(2, pages + 1):
+        page_url = playwright_worker._build_page_url(url, pattern, page_number)
+        if page_url == url:
+            break
+        try:
+            sibling_page, raw_html = _fetch_public_page_requests_with_html(page_url)
+        except PublicFetchError:
+            break  # a missing page 2 means the list ends at page 1
+        sibling_text = sibling_page.visible_text.strip()
+        if (
+            len(sibling_text) < _MIN_USABLE_TEXT_CHARS
+            or sibling_text == first_text
+            or any(
+                sibling_text == other.visible_text.strip() for other in siblings
+            )
+        ):
+            break  # redirect-to-page-1 or repeated page → list has ended
+        siblings.append(sibling_page)
+        collector = _HtmlLinkCollector(page_url)
+        collector.feed(raw_html)
+        for link in collector.links:
+            if link not in extra_links:
+                extra_links.append(link)
+    return siblings, extra_links
+
+
 def _fetch_one_with_expansion(
     context: Any,
     url: str,
@@ -459,11 +531,16 @@ def _fetch_one_with_expansion(
         )
         if campus_pages:
             return [page, *campus_pages]
+        sibling_pages, pagination_links = _pagination_sibling_pages(
+            url, page.visible_text
+        )
+        all_links = _merge_detail_links(collector.links, pagination_links)
         return [
             page,
+            *sibling_pages,
             *_expand_from_list_links(
                 url,
-                collector.links,
+                all_links,
                 page.visible_text,
                 context=context,
                 failure_sink=failure_sink,
@@ -642,6 +719,9 @@ __all__ = [
     "_CAMPUS_PORTAL_HOST",
     "_MAX_CAMPUS_INDEX_PAGES",
     "_MAX_CAMPUS_DETAIL_PAGES",
+    "_MAX_PAGINATION_PAGES",
+    "_merge_detail_links",
+    "_pagination_sibling_pages",
     "_iguopin_list_detail_urls",
     "_tencent_query_detail_urls",
     "_persist_fetch_failure",

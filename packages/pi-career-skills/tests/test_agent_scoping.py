@@ -100,10 +100,10 @@ def test_supervisor_scoping() -> None:
 
 
 def test_skill_scoping() -> None:
-    """Each skill agent sees exactly its own catalog (10/1/1/1), nothing else."""
+    """Each skill agent sees exactly its own catalog (13/2/2/2), nothing else."""
     counts = {skill: len(names) for skill, names in TOOL_CATALOG_BY_SKILL.items()}
     assert counts == {
-        "job-discovery": 11,
+        "job-discovery": 13,  # + browse-public-job-page, search-job-site
         "job-matching": 2,
         "resume-tailoring": 2,
         "career-planning": 2,
@@ -296,7 +296,9 @@ def test_unknown_skill_raises() -> None:
 #: sha256 (UTF-8) of the curated migration prompts, pinned at port time.
 _VERBATIM_HASHES = {
     "supervisor": "38d6d67087e13505bd82d06f587322dd7fd66a50775fb9ab435c9330f5d3e075",
-    "job-discovery": "631a9c17bd9d9ad569a5ff9103fff83ba03b7a1bc67df176f1acf4cf1dd5c951",
+    # Updated when P1/P2 documented browse-public-job-page / search-job-site
+    # and the JS-rendering rule in JOB_DISCOVERY_PROMPT.
+    "job-discovery": "4f457d3ece7c7aba71cc0fa6ccac644042f4ba4cd66f98ed98f2d0cac65165f8",
     "job-matching": "b1ec5fe666720c42d61a0d55d09294d799c929cea5d27781e34dd77f2cc80183",
     "resume-tailoring": "36bd80a0b851dcb6cde7c6612d3266bb4e846ed8e519a1de489bd11557d471e5",
     "career-planning": "5623795b2419c5972dd4726028f935a4c8cd71a3abbcd1e2c58d87961481a659",
