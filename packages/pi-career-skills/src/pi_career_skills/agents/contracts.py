@@ -7,8 +7,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from ..runtime.budgets import BudgetConsumed
-
 
 class DelegationStatus(StrEnum):
     """Trusted status returned by one skill delegation."""
@@ -123,7 +121,6 @@ class DelegationOutcome:
     refs: tuple[ArtifactRef, ...] | list[ArtifactRef | Mapping[str, Any]] = ()
     error_code: str | None = None
     action: DelegationAction | str | None = None
-    consumed_budget: BudgetConsumed | None = None
 
     def __post_init__(self) -> None:
         raw_status = str(self.status)

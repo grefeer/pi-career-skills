@@ -39,7 +39,6 @@ from ..business.job_discovery.models import (
     _url_shape_quality_override,
 )
 from . import playwright_worker
-from .adapters import _fetch_via_adapter
 from .page_fetch import (
     _PUBLIC_FETCH_HEADERS,
     _build_evidence_page,
@@ -469,10 +468,6 @@ def _fetch_one_with_expansion(
     if wechat_page is not None:
         _govern_put_cached_page(context, wechat_page)
         return [wechat_page]
-    adapter_page = _fetch_via_adapter(url)
-    if adapter_page is not None:
-        _govern_put_cached_page(context, adapter_page)
-        return [adapter_page]
     try:
         page, raw_html = _fetch_public_page_requests_with_html(url)
     except PublicFetchError as error:

@@ -211,9 +211,7 @@ def build_supervisor_graph(
     specs = [
         build_subagent_spec(
             skill_name=skill,
-            model=(models or {}).get(
-                CAPABILITY_REGISTRY[skill].model_key, model
-            ),
+            model=(models or {}).get(skill, model),
             registry=registry,
             context=replace(base_context, skill_name=skill),
             state=state,

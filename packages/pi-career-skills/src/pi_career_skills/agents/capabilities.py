@@ -8,10 +8,6 @@ from typing import Any
 
 from ..runtime.budgets import BudgetLimits
 
-TASK_FIELDS = frozenset(
-    {"objective", "input_refs", "constraints", "expected_output"}
-)
-
 
 @dataclass(frozen=True)
 class CapabilityDefinition:
@@ -19,15 +15,11 @@ class CapabilityDefinition:
 
     name: str
     description: str
-    accepts: frozenset[str]
     returns: frozenset[str]
     side_effects: frozenset[str]
     tool_names: tuple[str, ...]
     prerequisite: str
-    completion_key: str
     default_budget: Mapping[str, int]
-    model_key: str
-    prompt_resource: str
 
 
 class CapabilityRegistry(Mapping[str, CapabilityDefinition]):
@@ -60,22 +52,17 @@ def _definition(
     returns: set[str],
     side_effects: set[str],
     prerequisite: str,
-    completion_key: str,
     default_budget: dict[str, int],
     tool_names: list[str],
 ) -> CapabilityDefinition:
     return CapabilityDefinition(
         name=name,
         description=description,
-        accepts=TASK_FIELDS,
         returns=frozenset(returns),
         side_effects=frozenset(side_effects),
         tool_names=tuple(tool_names),
         prerequisite=prerequisite,
-        completion_key=completion_key,
         default_budget=default_budget,
-        model_key=name,
-        prompt_resource=f"archived_skills/{name}/SKILL.md",
     )
 
 
@@ -96,7 +83,6 @@ def build_capability_registry(
             returns={"public_job_page", "structured_job_details", "job_search_results"},
             side_effects={"read_public_evidence", "write_run_artifact"},
             prerequisite="none",
-            completion_key="job-discovery",
             default_budget={
                 "agent_turns": 24,
                 "tool_calls": 48,
@@ -112,7 +98,6 @@ def build_capability_registry(
             returns={"job_matching_report"},
             side_effects={"write_run_artifact"},
             prerequisite="structured_job_details",
-            completion_key="job-matching",
             default_budget={
                 "agent_turns": 12,
                 "tool_calls": 12,
@@ -128,7 +113,6 @@ def build_capability_registry(
             returns={"resume_tailoring_brief"},
             side_effects={"write_run_artifact"},
             prerequisite="job_bearing_artifact",
-            completion_key="resume-tailoring",
             default_budget={
                 "agent_turns": 12,
                 "tool_calls": 12,
@@ -144,7 +128,6 @@ def build_capability_registry(
             returns={"career_preparation_plan"},
             side_effects={"write_run_artifact"},
             prerequisite="job_bearing_artifact",
-            completion_key="career-planning",
             default_budget={
                 "agent_turns": 12,
                 "tool_calls": 12,
@@ -178,7 +161,6 @@ def capability_budget_limits(skill: str) -> BudgetLimits:
 
 
 __all__ = [
-    "TASK_FIELDS",
     "CapabilityDefinition",
     "CapabilityRegistry",
     "CAPABILITY_REGISTRY",

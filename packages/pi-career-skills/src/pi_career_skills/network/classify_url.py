@@ -8,7 +8,6 @@ browser, no full render).  Site classes mirror the skill's site-catalog
 classification:
 
   - ``wechat``   -- mp.weixin.qq.com / ReadGZH mirror (OCR pipeline);
-  - ``adapter``  -- host covered by a certified A1 adapter (fetch via JSON API);
   - ``static``   -- probe HTML already carries JD text / visible content;
   - ``spa``      -- probe is a JS shell (Playwright render required);
   - ``blocked``  -- probe failed, non-200, or anti-bot markers.
@@ -16,8 +15,7 @@ classification:
 Pi adaptations: the input/output models live in
 ``..business.job_discovery.models`` (byte-identical per the §6 contract
 snapshot gate); ``PublicFetchError`` (``.url_guard``) replaces the source's
-``PublicJobFetchError``; ``_fetch_validated`` / ``_adapter_company_for_url``
-come from ``.page_fetch`` / ``.adapters``.
+``PublicJobFetchError``; ``_fetch_validated`` comes from ``.page_fetch``.
 """
 
 from __future__ import annotations
@@ -31,7 +29,6 @@ from ..business.job_discovery.models import (
     ClassifyJobUrlOutput,
 )
 from ..context import ToolContext
-from .adapters import _adapter_company_for_url
 from .page_fetch import _fetch_validated
 from .url_guard import PublicFetchError
 
@@ -73,17 +70,12 @@ def classify_job_url(
 
 
 def _classify_one(url: str) -> ClassifiedJobUrl:
-    """One URL through the signal cascade: host -> adapter -> probe."""
+    """One URL through the signal cascade: host -> probe."""
     parsed = urlsplit(url)
     host = (parsed.hostname or "").lower()
     if host in _WECHAT_HOSTS:
         return ClassifiedJobUrl(
             url=url, site_class="wechat", evidence_signal=f"host={host}"
-        )
-    company = _adapter_company_for_url(url)
-    if company is not None:
-        return ClassifiedJobUrl(
-            url=url, site_class="adapter", evidence_signal=f"adapter={company}"
         )
     try:
         fetched = _fetch_validated(url)

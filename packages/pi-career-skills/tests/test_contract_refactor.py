@@ -101,12 +101,6 @@ def test_capability_registry_describes_all_skills_and_side_effects() -> None:
         "career-planning",
     }
     matching = CAPABILITY_REGISTRY.get("job-matching")
-    assert matching.accepts == {
-        "objective",
-        "input_refs",
-        "constraints",
-        "expected_output",
-    }
     assert matching.returns == {"job_matching_report"}
     assert matching.side_effects == {"write_run_artifact"}
     assert "match-observed-jobs" in matching.tool_names

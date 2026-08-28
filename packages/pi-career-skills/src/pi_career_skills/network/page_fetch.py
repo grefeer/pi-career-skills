@@ -40,7 +40,6 @@ from ..business.job_discovery.models import (
     _classify_page_quality_with_url,
 )
 from . import playwright_worker
-from .adapters import _fetch_via_adapter
 from .page_links import _HtmlLinkCollector
 from .request_governor import (
     before_request as _govern_before_request,
@@ -327,10 +326,6 @@ def fetch_public_job_page(
     if wechat_page is not None:
         _govern_put_cached_page(context, wechat_page)
         return wechat_page
-    adapter_page = _fetch_via_adapter(payload.url)
-    if adapter_page is not None:
-        _govern_put_cached_page(context, adapter_page)
-        return adapter_page
     try:
         page = _fetch_public_page_requests(payload.url)
         _govern_put_cached_page(context, page)

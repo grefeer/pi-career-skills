@@ -7,8 +7,8 @@ SDK wrapper (over ``pi_agent_core.Agent``), always with
 The supervisor sees ONLY the four ``delegate-<skill>`` tools; the business
 tools are never granted to it (tool_adapter re-checks skill isolation as
 defense in depth anyway).  Each delegation runs a FRESH skill agent with
-exactly its own skill's catalog (10 / 1 / 1 / 1) and its curated prompt —
-messages are never shared or reused across delegations.
+exactly its own skill's catalog (from ``CAPABILITY_REGISTRY``) and its
+curated prompt — messages are never shared or reused across delegations.
 
 Budgets, evidence promotion and events are NOT wired here; the Phase 7
 controller owns them (including the shared EvidenceStore).
@@ -22,7 +22,7 @@ from pi_ai import Model
 from pi_coding_agent import CodingAgent
 
 from ..context import ToolContext
-from ..registry import CareerToolRegistry, build_career_tool_registry
+from ..registry import CAREER_TOOL_REGISTRY, CareerToolRegistry
 from ..tool_adapter import make_agent_tool
 from .capabilities import CAPABILITY_REGISTRY
 from .delegation_tools import DelegationRunner, make_delegation_tool
@@ -47,7 +47,7 @@ _SKILL_PROMPTS: dict[str, str] = {
 _SUPERVISOR_SKILLS: tuple[str, ...] = tuple(CAPABILITY_REGISTRY)
 
 #: Registered definitions — resolves catalog names to ``ToolDefinition``.
-_REGISTRY = build_career_tool_registry()
+_REGISTRY = CAREER_TOOL_REGISTRY
 
 
 def build_supervisor_agent(

@@ -11,7 +11,6 @@ registry wiring stable); their implementations are split across:
 - :mod:`.career_sheets` — Tencent smartsheet records via the mcporter bridge;
 - :mod:`.wechat` / :mod:`.wechat_slice` / :mod:`.extract_gate` — WeChat OCR
   pipeline (gated off by default) and the regex-first extraction gate;
-- :mod:`.adapters` — certified A1 adapter gate (fail-closed by default);
 - :mod:`.playwright_worker` / :mod:`.subprocess_runner` / :mod:`.page_links` —
   render fallback, script running and link collection.
 """

@@ -571,10 +571,14 @@ def build_career_tool_registry() -> CareerToolRegistry:
     return registry
 
 
+#: Default catalog — built once at import.  ``build_career_tool_registry``
+#: stays public so hermetic tests can construct registries with stub handlers.
+CAREER_TOOL_REGISTRY = build_career_tool_registry()
+
 #: Per-skill catalog — Phase 5 uses this to scope each subagent's tool grant.
 #: job-discovery 11 / job-matching 2 / resume-tailoring 2 / career-planning 2.
 TOOL_CATALOG_BY_SKILL: dict[str, list[str]] = (
-    build_career_tool_registry().catalog_by_skill()
+    CAREER_TOOL_REGISTRY.catalog_by_skill()
 )
 
 
@@ -585,5 +589,6 @@ __all__ = [
     "TOOL_ARTIFACT_TYPE",
     "TOOL_CONTRACTS",
     "TOOL_CATALOG_BY_SKILL",
+    "CAREER_TOOL_REGISTRY",
     "build_career_tool_registry",
 ]

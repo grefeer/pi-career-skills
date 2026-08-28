@@ -21,7 +21,7 @@ from typing import Any
 from pi_ai import AssistantMessage, Model, ToolResultMessage
 from pi_coding_agent import CodingAgent
 
-from ..agents.capabilities import capability_budget_limits
+from ..agents.capabilities import CAPABILITY_REGISTRY, capability_budget_limits
 from ..agents.contracts import AgentTask
 from ..agents.delegation_tools import DelegationOutcome, DelegationRunner
 from ..agents.factory import build_skill_agent, build_supervisor_agent
@@ -38,17 +38,14 @@ from ..errors import (
     CareerToolError,
     redact_message,
 )
-from ..registry import build_career_tool_registry
+from ..registry import CAREER_TOOL_REGISTRY
 from .agent_hooks import ControllerHooks, build_controller_hooks
 from .budgets import BudgetConsumed, BudgetLimits, BudgetTracker, ToolCallGuard
 from .completion import (
     RunCompletionPolicy,
     _bounded_summary,
-    career_planning_completed,
-    discovery_completed,
     matching_completed,
     matching_fallback,
-    tailoring_completed,
 )
 from .context_projection import (
     RuntimeContextProjection,
@@ -60,19 +57,6 @@ from .evidence import EvidenceStore
 from .partial_answer import build_partial_answer
 from .recovery import AUTO_RECOVERABLE_REASONS, should_auto_recover
 from .state import RunState, RunStatus, transition
-
-#: Per-skill completion checker (§6.5).
-_SKILL_CHECKERS: dict[str, Callable[[Any], bool]] = {
-    "job-discovery": discovery_completed,
-    "job-matching": matching_completed,
-    "resume-tailoring": tailoring_completed,
-    "career-planning": career_planning_completed,
-}
-
-
-def _child_budget_limits(skill: str) -> BudgetLimits:
-    """Convert registry defaults into a bounded child budget."""
-    return capability_budget_limits(skill)
 
 
 def _delegation_status_for_error(error_code: str) -> str:
@@ -150,9 +134,7 @@ class CareerRunController:
     ) -> None:
         self._model = model
         self._models = dict(models or {})
-        self._registry = (
-            registry if registry is not None else build_career_tool_registry()
-        )
+        self._registry = registry if registry is not None else CAREER_TOOL_REGISTRY
         self._get_api_key = get_api_key or _default_get_api_key
 
     def _model_for(self, agent_name: str) -> Model:
@@ -638,7 +620,7 @@ class CareerRunController:
             projection.refresh(ctx.metadata, store)
 
         hooks.context_refresh_box[0] = refresh_callback
-        child_limits = _child_budget_limits(skill)
+        child_limits = capability_budget_limits(skill)
         child_tracker = (
             tracker.child(child_limits)
             if hasattr(tracker, "child")
@@ -695,7 +677,7 @@ class CareerRunController:
             # If a halt fired inside the skill agent → return as error.
             if halt_box[0] is not None:
                 halt_code, halt_msg = halt_box[0]
-                checker = _SKILL_CHECKERS.get(skill)
+                checker = RunCompletionPolicy.SKILL_CHECKERS.get(skill)
                 if checker is not None and checker(store):
                     # A budget/stall signal may arrive after the final tool
                     # has already persisted a valid deliverable. The durable
@@ -720,7 +702,7 @@ class CareerRunController:
             bounded = _bounded_summary(final_text)
             refs = store.refs()
 
-            checker = _SKILL_CHECKERS.get(skill)
+            checker = RunCompletionPolicy.SKILL_CHECKERS.get(skill)
             if checker is not None and checker(store):
                 state.completed_skills.add(skill)
 
@@ -969,10 +951,18 @@ def _serialize_artifacts(store: EvidenceStore) -> list[dict[str, Any]]:
 
 
 def _skill_has_evidence(skill: str, store: EvidenceStore) -> bool:
-    """Check whether *skill*'s prerequisite evidence exists (§6.7)."""
-    if skill == "job-discovery":
-        return True  # no prerequisite
-    if skill == "job-matching":
+    """Check whether *skill*'s prerequisite evidence exists (§6.7).
+
+    The evidence level is declared on ``CapabilityDefinition.prerequisite``
+    (the single source of truth); this resolver maps each level onto the
+    evidence store.
+    """
+    prerequisite = CAPABILITY_REGISTRY.require(skill).prerequisite
+    if prerequisite == "none":
+        return True
+    if prerequisite == "job_bearing_artifact":
+        return bool(store.job_bearing_artifacts())
+    if prerequisite == "structured_job_details":
         # Matching can score either structured candidates or a complete public
         # JD directly (``match_observed_jobs`` has a raw-evidence fallback).
         # Requiring extraction first made valid static campus/company pages
@@ -990,11 +980,6 @@ def _skill_has_evidence(skill: str, store: EvidenceStore) -> bool:
             ):
                 return True
         return False
-    if skill == "resume-tailoring":
-        # Need at least one job-bearing artifact.
-        return bool(store.job_bearing_artifacts())
-    if skill == "career-planning":
-        return bool(store.job_bearing_artifacts())
     return True
 
 
