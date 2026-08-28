@@ -19,7 +19,6 @@ from pi_career_skills.business.common.skill_validator import (
     load_skill_tags,
     normalize_skill,
     skills_from_text,
-    validate_skills,
 )
 from pi_career_skills.business.common.taxonomy import (
     classify_text,
@@ -102,26 +101,6 @@ def test_normalize_skill_alias() -> None:
 
 def test_normalize_skill_unknown_is_none() -> None:
     assert normalize_skill("definitely-not-a-real-skill-xyz") is None
-
-
-def test_validate_skills_basic_dedup_and_low_info_filter() -> None:
-    result = validate_skills(
-        ["Python", "python", "AI", "技术", "TypeScript"],
-    )
-    # Case variants dedupe to canonical; low-info labels drop.
-    assert "Python" in result
-    assert "AI" not in result
-    assert "技术" not in result
-    # Order preserved for survivors.
-    assert result == list(dict.fromkeys(result))
-
-
-def test_validate_skills_fallback_when_below_min() -> None:
-    text = "熟悉 Python 开发，了解 MySQL 数据库"
-    result = validate_skills([], fallback_text=text, min_tags=2)
-    assert len(result) >= 2
-    assert "Python" in result
-    assert "MySQL" in result
 
 
 def test_skills_from_text_order() -> None:

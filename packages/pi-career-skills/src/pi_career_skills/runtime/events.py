@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Callable
-from contextlib import suppress
 
 from ..contracts import RunEvent
 
@@ -38,7 +36,6 @@ class EventLogger:
         self._events: list[RunEvent] = []
         self._seq_counter = 0
         self._lock = threading.Lock()
-        self._subscribers: list[Callable[[RunEvent], None]] = []
 
     def append(self, event_type: str, payload: dict) -> int:
         """Append a new event and return its sequence number.
@@ -58,20 +55,12 @@ class EventLogger:
                 payload=bounded,
             )
             self._events.append(event)
-        for subscriber in list(self._subscribers):
-            with suppress(Exception):
-                # Subscriber exceptions never break the log.
-                subscriber(event)
         return seq
 
     def events(self) -> list[RunEvent]:
         """Return a snapshot of all events in order."""
         with self._lock:
             return list(self._events)
-
-    def subscribe(self, callback: Callable[[RunEvent], None]) -> None:
-        """Register a callback invoked on every new append."""
-        self._subscribers.append(callback)
 
     def _bounded_payload(self, payload: dict) -> dict:
         try:

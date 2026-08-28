@@ -22,7 +22,7 @@ the event loop.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel
@@ -81,7 +81,13 @@ from .business.skill_references import (
     read_skill_reference,
 )
 from .context import ToolContext
-from .network import tool_handlers as network_handlers
+from .network.batch_fetch import fetch_public_job_pages
+from .network.browse import browse_public_job_page, search_job_site
+from .network.career_sheets import query_career_sheet_records
+from .network.classify_url import classify_job_url
+from .network.page_fetch import fetch_public_job_page
+from .network.public_search import search_public_job_pages
+from .network.wechat import fetch_wechat_article
 
 #: Single source of truth: tool_name -> persisted artifact_type.
 #: Canonical artifact ports consumed by the kernel evidence boundary.  Adding
@@ -108,8 +114,6 @@ class ToolContract:
     """Model-facing execution contract used for atomic tool orchestration."""
 
     granularity: str = "atomic"
-    side_effects: frozenset[str] = frozenset()
-    idempotent: bool = True
     max_items: int | None = None
     fallback_route: str | None = None
     preferred_for_agent: bool = True
@@ -121,62 +125,51 @@ class ToolContract:
 TOOL_CONTRACTS: dict[str, ToolContract] = {
     "fetch-public-job-pages": ToolContract(
         granularity="batch",
-        side_effects=frozenset({"network", "write_run_artifact"}),
-        idempotent=True,
         max_items=10,
         fallback_route="fetch-public-job-page",
         preferred_for_agent=False,
     ),
     "extract-observed-job-details-batch": ToolContract(
         granularity="batch",
-        side_effects=frozenset({"write_run_artifact"}),
         max_items=10,
         fallback_route="extract-observed-job-details",
         preferred_for_agent=False,
     ),
     "fetch-wechat-article": ToolContract(
         granularity="composite",
-        side_effects=frozenset({"network", "ocr", "write_run_artifact"}),
         max_items=1,
         fallback_route="fetch-public-job-page",
     ),
     "browse-public-job-page": ToolContract(
         granularity="composite",
-        side_effects=frozenset({"network", "write_run_artifact"}),
         max_items=1,
         fallback_route="fetch-public-job-page",
     ),
     "search-job-site": ToolContract(
         granularity="source_query",
-        side_effects=frozenset({"network", "write_run_artifact"}),
         max_items=20,
         fallback_route="search-public-job-pages",
     ),
     "search-public-job-pages": ToolContract(
         granularity="source_query",
-        side_effects=frozenset({"network", "write_run_artifact"}),
         max_items=20,
         fallback_route="query-career-sheet-records",
     ),
     "query-career-sheet-records": ToolContract(
         granularity="source_query",
-        side_effects=frozenset({"remote_read", "write_run_artifact"}),
         max_items=100,
         fallback_route="search-public-job-pages",
     ),
     "match-observed-jobs": ToolContract(
         granularity="deliverable",
-        side_effects=frozenset({"write_run_artifact"}),
         max_items=100,
     ),
     "build-resume-tailoring-brief": ToolContract(
         granularity="deliverable",
-        side_effects=frozenset({"write_run_artifact"}),
         max_items=1,
     ),
     "build-preparation-plan": ToolContract(
         granularity="deliverable",
-        side_effects=frozenset({"write_run_artifact"}),
         max_items=1,
     ),
 }
@@ -184,12 +177,7 @@ TOOL_CONTRACTS: dict[str, ToolContract] = {
 
 @dataclass(frozen=True)
 class ToolDefinition:
-    """One registered skill tool: model contracts + the sync handler.
-
-    Mirrors the source ``ToolDefinition``; ``allowed_roles`` is retained for
-    contract parity but is not yet enforced at this layer (the pi runtime
-    grants tools per skill, not per role).
-    """
+    """One registered skill tool: model contracts + the sync handler."""
 
     name: str
     skill_name: str
@@ -199,9 +187,6 @@ class ToolDefinition:
     handler: Callable[[ToolContext, Any], Any]
     is_deliverable: bool = False
     artifact_type: str | None = None
-    allowed_roles: frozenset[str] = field(
-        default_factory=lambda: frozenset({"executor"})
-    )
     # Shared infrastructure tools can be exposed to several skill agents
     # while remaining a single registered model-facing tool name.
     allowed_skills: frozenset[str] | None = None
@@ -209,14 +194,7 @@ class ToolDefinition:
     @property
     def contract(self) -> ToolContract:
         """Return the explicit orchestration contract for this tool."""
-        return TOOL_CONTRACTS.get(
-            self.name,
-            ToolContract(
-                side_effects=frozenset({"write_run_artifact"})
-                if self.is_deliverable
-                else frozenset()
-            ),
-        )
+        return TOOL_CONTRACTS.get(self.name, ToolContract())
 
     @property
     def agent_description(self) -> str:
@@ -349,7 +327,7 @@ def build_career_tool_registry() -> CareerToolRegistry:
             skill_name="job-discovery",
             input_model=FetchPublicJobPagesInput,
             output_model=FetchPublicJobPagesOutput,
-            handler=network_handlers.fetch_public_job_pages,
+            handler=fetch_public_job_pages,
             is_deliverable=True,
             artifact_type=TOOL_ARTIFACT_TYPE["fetch-public-job-pages"],
             description=(
@@ -368,7 +346,7 @@ def build_career_tool_registry() -> CareerToolRegistry:
             skill_name="job-discovery",
             input_model=SearchPublicJobPagesInput,
             output_model=SearchPublicJobPagesOutput,
-            handler=network_handlers.search_public_job_pages,
+            handler=search_public_job_pages,
             is_deliverable=True,
             artifact_type=TOOL_ARTIFACT_TYPE["search-public-job-pages"],
             description=(
@@ -384,7 +362,7 @@ def build_career_tool_registry() -> CareerToolRegistry:
             skill_name="job-discovery",
             input_model=QueryCareerSheetRecordsInput,
             output_model=QueryCareerSheetRecordsOutput,
-            handler=network_handlers.query_career_sheet_records,
+            handler=query_career_sheet_records,
             is_deliverable=True,
             artifact_type=TOOL_ARTIFACT_TYPE["query-career-sheet-records"],
             description=(
@@ -403,7 +381,7 @@ def build_career_tool_registry() -> CareerToolRegistry:
             skill_name="job-discovery",
             input_model=FetchPublicJobPageInput,
             output_model=FetchPublicJobPageOutput,
-            handler=network_handlers.fetch_public_job_page,
+            handler=fetch_public_job_page,
             is_deliverable=True,
             artifact_type=TOOL_ARTIFACT_TYPE["fetch-public-job-page"],
             description=(
@@ -418,7 +396,7 @@ def build_career_tool_registry() -> CareerToolRegistry:
             skill_name="job-discovery",
             input_model=BrowsePublicJobPageInput,
             output_model=BrowsePublicJobPageOutput,
-            handler=network_handlers.browse_public_job_page,
+            handler=browse_public_job_page,
             is_deliverable=True,
             artifact_type=TOOL_ARTIFACT_TYPE["browse-public-job-page"],
             description=(
@@ -442,7 +420,7 @@ def build_career_tool_registry() -> CareerToolRegistry:
             skill_name="job-discovery",
             input_model=SearchJobSiteInput,
             output_model=SearchJobSiteOutput,
-            handler=network_handlers.search_job_site,
+            handler=search_job_site,
             is_deliverable=True,
             artifact_type=TOOL_ARTIFACT_TYPE["search-job-site"],
             description=(
@@ -487,7 +465,7 @@ def build_career_tool_registry() -> CareerToolRegistry:
             skill_name="job-discovery",
             input_model=FetchWechatArticleInput,
             output_model=FetchWechatArticleOutput,
-            handler=network_handlers.fetch_wechat_article,
+            handler=fetch_wechat_article,
             is_deliverable=True,
             artifact_type=TOOL_ARTIFACT_TYPE["fetch-wechat-article"],
             description=(
@@ -519,7 +497,7 @@ def build_career_tool_registry() -> CareerToolRegistry:
             skill_name="job-discovery",
             input_model=ClassifyJobUrlInput,
             output_model=ClassifyJobUrlOutput,
-            handler=network_handlers.classify_job_url,
+            handler=classify_job_url,
             description=(
                 "对候选 URL 做低预算站点分类（wechat/adapter/static/spa/blocked，"
                 "host 信号 + 4KB 探针，不启动浏览器）。"

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
 
 
 @dataclass
@@ -32,57 +31,3 @@ class NormalizedJobCandidate:
     # B1: strength dict {score, tier, base_score, evidence[]} from
     # tools.job_strength; optional and serialization-friendly by design.
     strength: dict | None = None
-
-
-@dataclass
-class StrategyRecord:
-    """In-memory representation of a matched strategy (decoupled from ORM)."""
-
-    id: str
-    url_pattern: str
-    site_type: str
-    description: str = ""
-    priority: int = 0
-    adapter: str | None = None
-    plan_yaml: str = ""
-    status: str = "active"
-    success_count: int = 0
-
-    @classmethod
-    def from_orm(cls, orm_obj: Any) -> StrategyRecord:
-        """Build from an ORM-like object exposing the same attributes."""
-        return cls(
-            id=orm_obj.id,
-            url_pattern=orm_obj.url_pattern,
-            site_type=orm_obj.site_type,
-            description=orm_obj.description or "",
-            priority=orm_obj.priority,
-            adapter=orm_obj.adapter,
-            plan_yaml=orm_obj.plan_yaml,
-            status=orm_obj.status,
-            success_count=orm_obj.success_count,
-        )
-
-
-RecruitmentType = Literal["campus", "internship", "social"]
-
-
-@dataclass
-class RecruitmentScope:
-    """Target recruitment scope for a single discovery task.
-
-    One task targets exactly one ``recruitment_type``. ``social`` has no
-    cohort; ``campus``/``internship`` require a ``graduation_year``.
-    """
-
-    recruitment_type: RecruitmentType = "campus"
-    graduation_year: int | None = 2027
-
-    def __post_init__(self) -> None:
-        if self.recruitment_type == "social":
-            self.graduation_year = None
-            return
-        if self.graduation_year is None:
-            raise ValueError(
-                "graduation_year is required for campus and internship"
-            )

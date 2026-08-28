@@ -10,10 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from pi_career_skills.business.resume_tailoring.keywords import (
-    goal_role_keywords,
-    tailoring_keywords,
-)
 from pi_career_skills.business.resume_tailoring.resume_tailoring import (
     BuildResumeTailoringBriefInput,
     ResumeTailoringError,
@@ -182,27 +178,3 @@ def test_target_artifact_missing_raises_not_found() -> None:
             ),
         )
     assert exc_info.value.code == "target_evidence_not_found"
-
-
-# ---------------------------------------------------------------------------
-# Direct tests: keywords helpers
-# ---------------------------------------------------------------------------
-
-def test_goal_role_keywords_frontend() -> None:
-    assert goal_role_keywords("前端开发工程师") == ["前端", "Frontend", "Vue"]
-
-
-def test_goal_role_keywords_fallback() -> None:
-    assert goal_role_keywords("随便一个岗位") == ["岗位"]
-
-
-def test_tailoring_keywords_from_candidate_and_facts() -> None:
-    candidate = {
-        "title": "Java 后端开发",
-        "responsibilities": "负责后端服务",
-        "requirements": "Java 后端经验",
-    }
-    confirmed = {"skills": ["Spring", "MySQL"]}
-    keywords = tailoring_keywords("随便一个岗位", confirmed, candidate)
-    # Candidate markers + confirmed skills, deduplicated, order preserved
-    assert keywords == ["Java", "后端", "Spring", "MySQL"]

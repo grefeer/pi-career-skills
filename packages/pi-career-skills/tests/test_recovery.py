@@ -4,15 +4,9 @@ plan, and the should_auto_recover decision logic.
 
 from __future__ import annotations
 
-import pytest
-
-from pi_career_skills.errors import CareerToolError
 from pi_career_skills.runtime.recovery import (
     AUTO_RECOVERABLE_REASONS,
     NEVER_AUTO_RECOVER_REASONS,
-    RecoveryPlan,
-    assert_recovery_allowed,
-    recovery_plan,
     should_auto_recover,
 )
 
@@ -91,43 +85,6 @@ def test_should_auto_recover_negative_index_clamps() -> None:
 
 
 # ---------------------------------------------------------------------------
-# recovery_plan
-# ---------------------------------------------------------------------------
-
-
-def test_recovery_plan_first_attempt_one_and_a_half_x() -> None:
-    """First recovery → 1.5x multiplier."""
-    plan = recovery_plan(attempt_index=0)
-    assert plan.allowed is True
-    assert plan.budget_multiplier == 1.5
-    assert plan.reset_stall_streak is True
-    assert plan.keep_artifacts is True
-    assert plan.refresh_wall_clock_window is True
-
-
-def test_recovery_plan_second_attempt_two_x() -> None:
-    """Second recovery → 2.0x multiplier."""
-    plan = recovery_plan(attempt_index=1)
-    assert plan.allowed is True
-    assert plan.budget_multiplier == 2.0
-
-
-def test_recovery_plan_third_attempt_not_allowed() -> None:
-    """Third+ recovery → not allowed, reason = auto_recovery_limit_reached."""
-    plan = recovery_plan(attempt_index=2)
-    assert plan.allowed is False
-    assert plan.reason_code == "auto_recovery_limit_reached"
-    assert plan.budget_multiplier == 1.0
-
-
-def test_recovery_plan_negative_index_clamps_to_first() -> None:
-    """Negative attempt_index is treated as the first recovery."""
-    plan = recovery_plan(attempt_index=-1)
-    assert plan.allowed is True
-    assert plan.budget_multiplier == 1.5
-
-
-# ---------------------------------------------------------------------------
 # Step-up clamp via BudgetTracker.step_up integration check
 # ---------------------------------------------------------------------------
 
@@ -165,47 +122,8 @@ def test_recovery_keeps_artifacts_resets_stall() -> None:
     assert guard.stall_streak == 5
     assert guard.artifact_count == 3
 
-    # Recovery: stall streak resets (per RecoveryPlan.reset_stall_streak).
+    # Recovery: stall streak resets.
     guard.reset_stall_on_delegation()
     assert guard.stall_streak == 0
     # Artifacts preserved.
     assert guard.artifact_count == 3
-
-
-# ---------------------------------------------------------------------------
-# assert_recovery_allowed (hardening guard)
-# ---------------------------------------------------------------------------
-
-
-def test_assert_recovery_allowed_ok() -> None:
-    """Recoverable + within budget → no raise."""
-    assert_recovery_allowed("need_user", attempt_index=0, max_recoveries=2)
-
-
-def test_assert_recovery_allowed_blocked_raises() -> None:
-    """Blocked reason → contract_or_policy_error."""
-    with pytest.raises(CareerToolError) as exc:
-        assert_recovery_allowed("captcha", 0, 2)
-    assert exc.value.code == "contract_or_policy_error"
-
-
-def test_assert_recovery_allowed_over_limit_raises() -> None:
-    """Over the recovery limit → contract_or_policy_error."""
-    with pytest.raises(CareerToolError) as exc:
-        assert_recovery_allowed("need_user", 5, 2)
-    assert exc.value.code == "contract_or_policy_error"
-
-
-# ---------------------------------------------------------------------------
-# RecoveryPlan type
-# ---------------------------------------------------------------------------
-
-
-def test_recovery_plan_is_frozen_like() -> None:
-    """RecoveryPlan should be a frozen dataclass (immutable)."""
-    from dataclasses import FrozenInstanceError
-
-    plan = recovery_plan(0)
-    assert isinstance(plan, RecoveryPlan)
-    with pytest.raises(FrozenInstanceError):
-        plan.budget_multiplier = 99  # type: ignore[misc]

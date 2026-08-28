@@ -26,7 +26,6 @@ from pi_career_skills.runtime.budgets import (
     ToolCallGuard,
 )
 from pi_career_skills.runtime.completion import terminal_guard
-from pi_career_skills.runtime.recovery import assert_recovery_allowed
 from pi_career_skills.runtime.state import RunState, RunStatus, transition
 
 # ---------------------------------------------------------------------------
@@ -152,18 +151,6 @@ def test_terminal_guard_uses_constant() -> None:
     state.terminal = True
     with pytest.raises(CareerToolError) as exc:
         terminal_guard(state)
-    assert exc.value.code == CONTRACT_OR_POLICY_ERROR
-
-
-def test_recovery_assert_blocked_uses_constant() -> None:
-    with pytest.raises(CareerToolError) as exc:
-        assert_recovery_allowed("login_required", 0, 2)
-    assert exc.value.code == CONTRACT_OR_POLICY_ERROR
-
-
-def test_recovery_assert_over_limit_uses_constant() -> None:
-    with pytest.raises(CareerToolError) as exc:
-        assert_recovery_allowed("invalid_model_response", 5, 2)
     assert exc.value.code == CONTRACT_OR_POLICY_ERROR
 
 

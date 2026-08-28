@@ -114,12 +114,14 @@ def _fake_response(
 
 
 @pytest.fixture(autouse=True)
-def _reset_runtime_toggles() -> None:
+def _reset_runtime_toggles():
     """Restore the module-level runtime gates after every test."""
     playwright_worker._PLAYWRIGHT_FALLBACK_ENABLED = False
     playwright_worker._PLAYWRIGHT_STORAGE_STATE_PATH = None
     playwright_worker._PLAYWRIGHT_FETCH_IMPL = None
     wechat._WECHAT_OCR_ENABLED = False
+    yield
+    wechat._WECHAT_OCR_ENABLED = True
 
 
 # ---------------------------------------------------------------------------

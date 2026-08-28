@@ -152,31 +152,3 @@ def skills_from_text(text: str) -> list[str]:
     used directly as the only source.  Empty text -> [].
     """
     return _fallback_from_text([], text)
-
-
-def validate_skills(
-    raw_tags: object,
-    *,
-    fallback_text: str = "",
-    min_tags: int = 0,
-) -> list[str]:
-    """Validate LLM-emitted tags against the closed set with a deterministic fallback.
-
-    Stages: coerce -> normalize/dedupe -> low-information filter -> when the
-    result is below ``min_tags``, append closed-set tags literally named in
-    ``fallback_text`` (in closed-set order, deduped).  The fallback never
-    invents a tag that is absent from both the model output and the JD text.
-    """
-    if not isinstance(raw_tags, list):
-        raw_tags = []
-    tags: list[str] = []
-    for value in raw_tags:
-        if not isinstance(value, str):
-            continue
-        normalized = normalize_skill(value)
-        if normalized is not None and normalized not in tags:
-            tags.append(normalized)
-    tags = filter_low_information(tags)
-    if len(tags) < min_tags:
-        tags = _fallback_from_text(tags, fallback_text)
-    return tags

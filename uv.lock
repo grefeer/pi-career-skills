@@ -1482,7 +1482,6 @@ dependencies = [
     { name = "pi-py-ai" },
     { name = "pi-py-coding-agent" },
     { name = "pydantic" },
-    { name = "pyyaml" },
     { name = "requests" },
 ]
 
@@ -1498,7 +1497,6 @@ requires-dist = [
     { name = "pi-py-coding-agent", editable = "packages/pi-coding-agent" },
     { name = "playwright", marker = "extra == 'playwright'", specifier = ">=1.40" },
     { name = "pydantic", specifier = ">=2" },
-    { name = "pyyaml", specifier = ">=6" },
     { name = "requests", specifier = ">=2.31" },
 ]
 provides-extras = ["playwright"]

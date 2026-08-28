@@ -25,62 +25,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..contracts import Artifact, ToolObservation
-
-# ---------------------------------------------------------------------------
-# Local copies of registry / tool-adapter values.
-#
-# The canonical source is ``pi_career_skills.registry.TOOL_ARTIFACT_TYPE``
-# and ``pi_career_skills.tool_adapter.bound_content``.  We re-import when
-# available and fall back to these verbatim mirrors so the module is
-# self-contained for testing before the parallel Task D lands.
-# ---------------------------------------------------------------------------
-
-try:  # pragma: no cover - import-only branch
-    from ..registry import TOOL_ARTIFACT_TYPE
-except ImportError:  # pragma: no cover - parallel-task gap
-    #: tool_name -> artifact_type.  Mirrors
-    #: ``backend/app/services/career_skills/registry.py`` verbatim.
-    TOOL_ARTIFACT_TYPE: dict[str, str] = {
-        "fetch-public-job-pages": "public_job_page",
-        "fetch-public-job-page": "public_job_page",
-        "fetch-wechat-article": "public_job_page",
-        "search-public-job-pages": "job_search_results",
-        "query-career-sheet-records": "job_search_results",
-        "extract-observed-job-details": "structured_job_details",
-        "extract-observed-job-details-batch": "structured_job_details",
-        "match-observed-jobs": "job_matching_report",
-        "build-resume-tailoring-brief": "resume_tailoring_brief",
-    }
-
-try:  # pragma: no cover - import-only branch
-    from ..tool_adapter import bound_content
-except ImportError:  # pragma: no cover - parallel-task gap
-
-    def bound_content(value: Mapping[str, Any]) -> dict[str, Any]:
-        """Return a bounded copy of *value* (40 / 12_000 / 20 / 1_200).
-
-        Mirrors ``backend/app/services/agent_kernel/evidence.py``
-        ``_bounded_content`` exactly.
-        """
-        result: dict[str, Any] = {}
-        for key, item in list(value.items())[:40]:
-            if isinstance(item, str):
-                result[str(key)] = item[:12_000]
-            elif isinstance(item, (int, float, bool)) or item is None:
-                result[str(key)] = item
-            elif isinstance(item, list):
-                result[str(key)] = [
-                    (
-                        bound_content(nested)
-                        if isinstance(nested, Mapping)
-                        else str(nested)[:1_200]
-                    )
-                    for nested in item[:20]
-                ]
-            elif isinstance(item, Mapping):
-                result[str(key)] = bound_content(item)
-        return result
-
+from ..registry import TOOL_ARTIFACT_TYPE
+from ..tool_adapter import bound_content
 
 # ---------------------------------------------------------------------------
 # Semantic-validation constants — verbatim from completion.py source.

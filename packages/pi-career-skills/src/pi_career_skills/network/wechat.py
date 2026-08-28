@@ -36,7 +36,7 @@ from .wechat_slice import run_wechat_slice
 #: generic chain.
 _WECHAT_ARTICLE_HOST = "mp.weixin.qq.com"
 
-_WECHAT_OCR_ENABLED = False
+_WECHAT_OCR_ENABLED = True
 _WECHAT_OUT_DIR_DEFAULT = str(
     Path(__file__).resolve().parents[3] / "var" / "job-discovery-skill" / "ocr"
 )

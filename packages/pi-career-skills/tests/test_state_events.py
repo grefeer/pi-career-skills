@@ -107,25 +107,6 @@ class TestEventLogger:
         serialized = json.dumps(event.payload)
         assert len(serialized.encode("utf-8")) < 200
 
-    def test_subscriber_receives_events(self):
-        log = EventLogger()
-        received = []
-        log.subscribe(lambda e: received.append(e.type))
-        log.append("a", {})
-        log.append("b", {})
-        assert received == ["a", "b"]
-
-    def test_subscriber_exception_does_not_break_log(self):
-        log = EventLogger()
-
-        def bad_cb(_e):
-            raise RuntimeError("boom")
-
-        log.subscribe(bad_cb)
-        seq = log.append("test", {})
-        assert seq == 1
-        assert len(log.events()) == 1
-
     def test_events_returns_snapshot(self):
         log = EventLogger()
         log.append("a", {})
