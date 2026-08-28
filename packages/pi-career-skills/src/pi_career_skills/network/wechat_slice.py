@@ -361,7 +361,7 @@ def _run_ocr(
     image is skipped - the slice never crashes on OCR failure.
     """
     out = (runner or run_skill_script)(
-        "ocr_image", cli_args=f"{image_path} --engine auto --out {out_dir}"
+        "ocr_image", [image_path, "--engine", "auto", "--out", out_dir]
     )
     try:
         result = json.JSONDecoder().raw_decode(out, 0)[0]
