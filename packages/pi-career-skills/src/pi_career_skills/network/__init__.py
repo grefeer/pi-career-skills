@@ -1,7 +1,7 @@
 """Network tool layer for the ``job-discovery`` Skill (Phase 6).
 
-The six tool handlers live in :mod:`.handlers` (thin re-exports keeping the
-registry wiring stable); their implementations are split across:
+The six tool handlers live in :mod:`.tool_handlers` (thin re-exports keeping
+the registry wiring stable); their implementations are split across:
 
 - :mod:`.url_guard` — SSRF guard (scheme / userinfo / DNS global-IP checks);
 - :mod:`.page_fetch` — single-page fetch (requests path + evidence building);
@@ -15,7 +15,7 @@ registry wiring stable); their implementations are split across:
   render fallback, script running and link collection.
 """
 
-from .handlers import (
+from .tool_handlers import (
     classify_job_url,
     fetch_public_job_page,
     fetch_public_job_pages,

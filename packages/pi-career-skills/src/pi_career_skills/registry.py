@@ -81,7 +81,7 @@ from .business.skill_references import (
     read_skill_reference,
 )
 from .context import ToolContext
-from .network import handlers as network_handlers
+from .network import tool_handlers as network_handlers
 
 #: Single source of truth: tool_name -> persisted artifact_type.
 #: Canonical artifact ports consumed by the kernel evidence boundary.  Adding
