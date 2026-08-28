@@ -35,7 +35,7 @@ dev = [
 
 [tool.uv.workspace]
 # uv workspace: 所有子包作为成员, 可互相以 editable 方式引用
-members = ["packages/*"]
+members = ["packages/*", "deepagents_packages"]
 
 [tool.uv.sources]
 # 包间依赖走 workspace, 而非从 PyPI 解析

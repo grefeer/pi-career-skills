@@ -6,6 +6,8 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from ..runtime.budgets import BudgetLimits
+
 TASK_FIELDS = frozenset(
     {"objective", "input_refs", "constraints", "expected_output"}
 )
@@ -162,10 +164,24 @@ def build_capability_registry(
 CAPABILITY_REGISTRY = build_capability_registry()
 
 
+def capability_budget_limits(skill: str) -> BudgetLimits:
+    """Convert a capability's defaults into a bounded child budget."""
+    defaults = CAPABILITY_REGISTRY.require(skill).default_budget
+    return BudgetLimits(
+        agent_turns=int(defaults["agent_turns"]),
+        initial_tool_calls=int(defaults["tool_calls"]),
+        model_requests=int(defaults["model_requests"]),
+        input_tokens=int(defaults["input_tokens"]),
+        wall_clock_seconds=int(defaults["wall_clock_seconds"]),
+        auto_recoveries=0,
+    )
+
+
 __all__ = [
     "TASK_FIELDS",
     "CapabilityDefinition",
     "CapabilityRegistry",
     "CAPABILITY_REGISTRY",
     "build_capability_registry",
+    "capability_budget_limits",
 ]

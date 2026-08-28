@@ -1,8 +1,17 @@
-"""pi-career-skills 单次运行入口：用户问题 + 简历(URL/PDF/文本) → 运行结果 + 工具调用日志。
+"""deepagents 版单次运行入口（与根目录 ``main.py`` 对齐）。
+
+用户问题 + 简历(URL/PDF/文本) → deepagents 控制器运行结果 + 工具调用日志。
 
 用法（真实运行需要环境变量 DEEPSEEK_API_KEY）：
-    python main.py
-或用 ``model_id="faux"`` 做无需 API key 的冒烟测试。
+    .venv/Scripts/python.exe deepagents_packages/main_deepagents.py
+或用 ``model_id="faux"`` 做无需 API key 的冒烟测试（脚本内置 ScriptedFakeChatModel，
+见 ``deepagents_skills.models``）。
+
+与 pi 版 main.py 的行为差异（结构保持不变，见 MIGRATION.md）：
+    - 代理驱动从 pi-agent-core 换成 deepagents ``create_deep_agent``；
+    - 委托从 pi delegation tools 换成 deepagents 官方 ``task`` 子代理；
+    - harness 逻辑以 langchain AgentMiddleware 的 4 个自定义中间件实现；
+    - 其余（简历解析、profile facts、RunRequest 组装、事件 jsonl 日志）完全一致。
 
 工具调用日志：
     - 逐条 print 到控制台；
@@ -15,18 +24,22 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
 import requests
+from deepagents_skills.contracts import RunRequest, RunResult
+from deepagents_skills.controller import CareerRunController
+from deepagents_skills.models import (
+    ScriptedFakeChatModel,
+    create_deepseek_chat_model,
+)
 
 from pi_career_skills.evaluation.profile_facts import build_profile_facts
 from pi_career_skills.evaluation.seed_urls import ALL_SKILLS
-from pi_career_skills.model_factory import create_deepseek_model, resolve_api_key
 from pi_career_skills.runtime.budgets import BudgetLimits
-from pi_career_skills.runtime.controller import CareerRunController, RunRequest, RunResult
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -40,6 +53,7 @@ DOWNLOAD_TIMEOUT = 30  # 秒
 
 # ---------------------------------------------------------------------------
 # 简历加载：URL（支持 .pdf / .txt / .html）或直接文本 → 纯文本
+# （与 main.py 完全一致的解析逻辑）
 # ---------------------------------------------------------------------------
 
 
@@ -174,7 +188,7 @@ def log_run_events(result: RunResult, log_path: Path) -> None:
     with open(log_path, "a", encoding="utf-8") as fh:
         for event in result.events:
             line = {
-                "ts": datetime.now(timezone.utc).isoformat(),
+                "ts": datetime.now(UTC).isoformat(),
                 "seq": event.seq,
                 "type": event.type,
                 "run_id": event.run_id,
@@ -194,13 +208,8 @@ def log_run_events(result: RunResult, log_path: Path) -> None:
 def _make_controller(model_id: str) -> CareerRunController:
     """按 model_id 构建控制器；\"faux\" 走假模型（无需 API key）。"""
     if model_id == "faux":
-        from pi_ai.providers.faux import FAUX_MODEL
-
-        return CareerRunController(FAUX_MODEL, get_api_key=resolve_api_key)
-    return CareerRunController(
-        create_deepseek_model(model_id),
-        get_api_key=resolve_api_key,
-    )
+        return CareerRunController(ScriptedFakeChatModel())
+    return CareerRunController(create_deepseek_chat_model(model_id))
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +228,7 @@ async def run_career_task(
     wall_clock_seconds: int = 600,
     log_dir: str | Path = DEFAULT_LOG_DIR,
 ) -> RunResult:
-    """跑一次求职多 Agent 任务。
+    """跑一次求职多 Agent 任务（deepagents 版）。
 
     参数：
         question: 用户问题（如“收集华为 AI 应用开发岗位并匹配我的简历”）。
@@ -300,17 +309,17 @@ if __name__ == "__main__":
         "目标岗位限定为 AI应用开发、Agent开发等岗位。收集腾讯智能文档里最近2天（8月27号~8月28号）相关的岗位"
         "按匹配度筛选。"
     )
-    _RESUME_PDF = "D:\\Desktop\\高硕谦+东北大学+控制科学与工程+硕士.pdf"
     _SEED_URL = (
         "https://www.iguopin.com/job/list?keyword=AI%E5%BA%94%E7%94%A8%E5%BC%80%E5%8F%91"
     )
+    _RESUME_PDF = "D:\\Desktop\\高硕谦+东北大学+控制科学与工程+硕士.pdf"
 
     result = asyncio.run(
         run_career_task(
             # question=_QUESTION + "\n\n请优先从以下种子链接收集证据：\n" + _SEED_URL,
             question=_QUESTION,
             resume_url=_RESUME_PDF,
-            user_id="test-Q046",
+            user_id="grefer",
             skills=["job-discovery", "job-matching"],
             wall_clock_seconds=900,
         )

@@ -94,6 +94,24 @@ def _is_skill_allowed(context: ToolContext, definition: ToolDefinition) -> bool:
     )
 
 
+def _forbidden_observation(
+    definition: ToolDefinition,
+    context: ToolContext,
+    tool_call_id: str | None,
+) -> ToolObservation:
+    """Build the shared model-facing isolation failure envelope."""
+    return ToolObservation(
+        tool_name=definition.name,
+        status="failed",
+        error_code=TOOL_SKILL_FORBIDDEN,
+        error_message=redact_message(
+            f"tool {definition.name} requires skill {definition.skill_name}, "
+            f"context skill: {context.skill_name or 'none'}"
+        ),
+        tool_call_id=tool_call_id,
+    )
+
+
 def _invalid_input_observation(
     definition: ToolDefinition, exc: Any, tool_call_id: str | None
 ) -> ToolObservation:
@@ -177,6 +195,8 @@ def invoke_tool_sync(
     tool_name: str,
     tool_call_id: str | None,
     params: dict[str, Any],
+    *,
+    enforce_skill_isolation: bool = False,
 ) -> ToolObservation:
     """Trusted-kernel sync invoke — unknown tools only; no skill isolation.
 
@@ -193,6 +213,8 @@ def invoke_tool_sync(
             error_message=redact_message(f"unknown tool: {tool_name}"),
             tool_call_id=tool_call_id,
         )
+    if enforce_skill_isolation and not _is_skill_allowed(context, definition):
+        return _forbidden_observation(definition, context, tool_call_id)
     return _execute_definition(definition, context, params, tool_call_id)
 
 
@@ -220,16 +242,7 @@ async def invoke_tool(
             tool_call_id=tool_call_id,
         )
     if not _is_skill_allowed(context, definition):
-        return ToolObservation(
-            tool_name=tool_name,
-            status="failed",
-            error_code=TOOL_SKILL_FORBIDDEN,
-            error_message=redact_message(
-                f"tool {tool_name} requires skill {definition.skill_name}, "
-                f"context skill: {context.skill_name or 'none'}"
-            ),
-            tool_call_id=tool_call_id,
-        )
+        return _forbidden_observation(definition, context, tool_call_id)
     return await asyncio.to_thread(
         _execute_definition, definition, context, params, tool_call_id
     )
@@ -296,16 +309,8 @@ class _RegisteredAgentTool:
         del cancel_event, on_update
         definition = self._definition
         if not _is_skill_allowed(self._context, definition):
-            observation = ToolObservation(
-                tool_name=definition.name,
-                status="failed",
-                error_code=TOOL_SKILL_FORBIDDEN,
-                error_message=redact_message(
-                    f"tool {definition.name} requires skill "
-                    f"{definition.skill_name}, context skill: "
-                    f"{self._context.skill_name or 'none'}"
-                ),
-                tool_call_id=tool_call_id,
+            observation = _forbidden_observation(
+                definition, self._context, tool_call_id
             )
         else:
             observation = await asyncio.to_thread(

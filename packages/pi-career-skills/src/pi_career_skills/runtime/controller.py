@@ -21,7 +21,7 @@ from typing import Any
 from pi_ai import AssistantMessage, Model, ToolResultMessage
 from pi_coding_agent import CodingAgent
 
-from ..agents.capabilities import CAPABILITY_REGISTRY
+from ..agents.capabilities import capability_budget_limits
 from ..agents.contracts import AgentTask
 from ..agents.delegation_tools import DelegationOutcome, DelegationRunner
 from ..agents.factory import build_skill_agent, build_supervisor_agent
@@ -57,6 +57,7 @@ from .context_projection import (
 )
 from .events import EventLogger
 from .evidence import EvidenceStore
+from .partial_answer import build_partial_answer
 from .recovery import AUTO_RECOVERABLE_REASONS, should_auto_recover
 from .state import RunState, RunStatus, transition
 
@@ -71,15 +72,7 @@ _SKILL_CHECKERS: dict[str, Callable[[Any], bool]] = {
 
 def _child_budget_limits(skill: str) -> BudgetLimits:
     """Convert registry defaults into a bounded child budget."""
-    defaults = CAPABILITY_REGISTRY.require(skill).default_budget
-    return BudgetLimits(
-        agent_turns=int(defaults["agent_turns"]),
-        initial_tool_calls=int(defaults["tool_calls"]),
-        model_requests=int(defaults["model_requests"]),
-        input_tokens=int(defaults["input_tokens"]),
-        wall_clock_seconds=int(defaults["wall_clock_seconds"]),
-        auto_recoveries=0,
-    )
+    return capability_budget_limits(skill)
 
 
 def _delegation_status_for_error(error_code: str) -> str:
@@ -894,6 +887,13 @@ class CareerRunController:
         attempt_count: int,
     ) -> RunResult:
         """Transition state to terminal, append final event, return result."""
+        # Non-succeeded runs still owe the user a text answer from the partial
+        # evidence (budget/wall-clock/evidence-gate terminations).  The partial
+        # answer is deterministic and source-backed — it never fabricates jobs.
+        if status in {"waiting_user", "failed"}:
+            partial = build_partial_answer(store, error_code=error_code)
+            if partial:
+                state.summary = partial
         transition(
             state,
             RunStatus(status),

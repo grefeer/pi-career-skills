@@ -1,0 +1,78 @@
+C001[0] chain link skills=['job-discovery'] role=AI Agent 开发工程师
+  Q: 请在猎聘网AI Agent 开发工程师专区收集适合我的岗位信息（岗位名称、公司、城市、薪资、经验/学历要求），抓取页面并保存证据。
+C001[1] chain link skills=['job-matching'] role=AI Agent 开发工程师
+  Q: 目标岗位限定为AI Agent 开发工程师。针对上一环节收集到的岗位，结合我的简历按匹配度排序，选出最适合我的一个并说明理由。
+C002[0] chain link skills=['job-discovery'] role=央国企 AI 应用/Agent 开发工程师
+  Q: 目标岗位限定为央国企 AI 应用/Agent 开发工程师。请在百度校园招聘（talent.baidu.com）收集适合我的 AI 算法/AI 应用方向校招岗位 JD。
+C002[1] chain link skills=['resume-tailoring'] role=央国企 AI 应用/Agent 开发工程师
+  Q: 目标岗位限定为央国企 AI 应用/Agent 开发工程师。基于上一环节收集的岗位和我的简历，为最匹配的岗位生成简历定制化修改建议（改动点+原因）。
+C003[0] chain link skills=['job-discovery'] role=AI Agent 开发工程师
+  Q: 请在猎聘网AI Agent 开发工程师专区收集适合我的岗位信息（岗位名称、公司、城市、薪资、经验/学历要求），抓取页面并保存证据。
+C003[1] chain link skills=['job-matching'] role=AI Agent 开发工程师
+  Q: 目标岗位限定为AI Agent 开发工程师。结合我的简历，为上一环节收集的岗位按匹配度排序，选出最匹配的一个。
+C003[2] chain link skills=['career-planning'] role=AI Agent 开发工程师
+  Q: 目标岗位限定为AI Agent 开发工程师。针对上一环节选出的最匹配岗位，给我一份面试准备计划。
+C006[0] chain link skills=['job-discovery'] role=AI 应用开发工程师
+  Q: 请在猎聘网 AI 应用开发工程师专区收集适合我的岗位信息（岗位名称、公司、城市、薪资、经验/学历要求），抓取页面并保存证据。
+C006[1] chain link skills=['job-matching'] role=AI 应用开发工程师
+  Q: 目标岗位限定为AI 应用开发工程师。针对上一环节收集的岗位，结合我的简历按匹配度排序，选出最匹配的一个。
+C007[0] chain link skills=['job-discovery'] role=AI 应用开发工程师
+  Q: 请在猎聘网 AI 应用开发工程师专区收集适合我的 AI 应用开发工程师社招岗位及岗位信息（岗位名称、公司、城市、薪资、经验/学历要求），抓取页面并保存证据。
+C007[1] chain link skills=['career-planning'] role=AI 应用开发工程师
+  Q: 目标岗位限定为AI 应用开发工程师。针对上一环节收集的岗位，给我一份面试准备计划。
+C008[0] chain link skills=['job-discovery'] role=AI 应用开发工程师
+  Q: 请在猎聘网 AI 应用开发工程师专区收集适合我的岗位信息（岗位名称、公司、城市、薪资、经验/学历要求），抓取页面并保存证据。
+C008[1] chain link skills=['job-matching'] role=AI 应用开发工程师
+  Q: 目标岗位限定为AI 应用开发工程师。结合我的简历，为上一环节收集的岗位按匹配度排序，选出最匹配的一个。
+C008[2] chain link skills=['resume-tailoring'] role=AI 应用开发工程师
+  Q: 目标岗位限定为AI 应用开发工程师。基于上一环节选出的最匹配岗位，给出简历定制化修改建议（改动点+原因）。
+C010[0] chain link skills=['job-discovery'] role=AI 应用开发工程师
+  Q: 请在猎聘网AI 应用开发工程师专区收集适合我的岗位信息（岗位名称、公司、城市、薪资、经验/学历要求），抓取页面并保存证据。
+C010[1] chain link skills=['resume-tailoring'] role=AI 应用开发工程师
+  Q: 目标岗位限定为AI 应用开发工程师。基于上一环节收集的岗位和我的简历，为最匹配的岗位生成简历定制化修改建议。
+C013[0] chain link skills=['job-discovery'] role=AI Agent 开发工程师
+  Q: 请在猎聘AI Agent 开发工程师专区收集适合我的 AI Agent 开发工程师（应届生）岗位信息（岗位名称、公司、城市、薪资、经验/学历要求），抓取页面并保存证据。
+C013[1] chain link skills=['career-planning'] role=AI Agent 开发工程师
+  Q: 目标岗位限定为AI Agent 开发工程师。针对上一环节收集的岗位，给我一份面试准备计划。
+C014[0] chain link skills=['job-discovery'] role=AI Agent 开发工程师
+  Q: 请在猎聘AI Agent 开发工程师专区收集适合我的 AI Agent 开发工程师（应届生）岗位信息（岗位名称、公司、城市、薪资、经验/学历要求），抓取页面并保存证据。
+C014[1] chain link skills=['job-matching'] role=AI Agent 开发工程师
+  Q: 目标岗位限定为AI Agent 开发工程师。结合我的简历，为上一环节收集的岗位按匹配度排序，选出最匹配的一个。
+C014[2] chain link skills=['resume-tailoring'] role=AI Agent 开发工程师
+  Q: 目标岗位限定为AI Agent 开发工程师。基于上一环节选出的最匹配岗位，给出简历定制化修改建议（改动点+原因）。
+C015[0] chain link skills=['job-discovery'] role=央国企 AI 应用/Agent 开发工程师
+  Q: 目标岗位限定为央国企 AI 应用/Agent 开发工程师。请在百度校园招聘（talent.baidu.com）收集适合我的 AI 算法/AI 应用方向校招岗位 JD。
+C015[1] chain link skills=['job-matching'] role=央国企 AI 应用/Agent 开发工程师
+  Q: 目标岗位限定为央国企 AI 应用/Agent 开发工程师。结合我的简历，为上一环节收集的岗位按匹配度排序，选出最匹配的一个。
+C015[2] chain link skills=['career-planning'] role=央国企 AI 应用/Agent 开发工程师
+  Q: 目标岗位限定为央国企 AI 应用/Agent 开发工程师。针对上一环节选出的最匹配岗位，给我一份面试准备计划。
+Q011 skills=['resume-tailoring'] role=AI 应用开发工程师 url=['https://www.iguopin.com/job/list?keyword=AI%E5%BA%94%E7%94%A8%E5%BC%80%E5%8F%91']
+  Q: 针对岗位“AI 应用开发工程师”帮我定制简历，突出Vue3、TypeScript、Vite相关经历。
+Q017 skills=['career-planning'] role=AI Agent 开发工程师 url=['https://www.liepin.com/zpdmxyykfgcsz24g', 'https://www.iguopin.com/job/list?keyword=%E5%A4%A7%E6%A8%A1%E5%9E%8B%E5%BA%94%E7%94%A8%E5%BC%80%E5%8F%91']
+  Q: 给出AI Agent 开发工程师岗位的面试建议，包括常见问题与回答要点。
+Q028 skills=['job-discovery', 'job-matching', 'resume-tailoring'] role=AI Agent 开发工程师 url=['https://www.liepin.com/zpdmxyykfgcsz24g', 'https://www.iguopin.com/job/list?keyword=%E5%A4%A7%E6%A8%A1%E5%9E%8B%E5%BA%94%E7%94%A8%E5%BC%80%E5%8F%91']
+  Q: 最近3天学校就业指导中心官网/就业信息网适合我的AI Agent 开发工程师（应届生）岗位有哪些？为最匹配的岗位定制简历。
+Q034 skills=['job-discovery', 'job-matching'] role=央国企 AI 应用/Agent 开发工程师 url=['https://www.iguopin.com/job/list?keyword=AI%E5%BA%94%E7%94%A8%E5%BC%80%E5%8F%91', 'https://career.hebut.edu.cn/correcruit/content/id/78016.html']
+  Q: 在国聘网找最近1天的央国企 AI 应用/Agent 开发工程师（3 年经验）岗位并筛选出最适合我的。
+Q040 skills=['job-discovery', 'resume-tailoring'] role=AI Agent 开发工程师 url=['https://www.liepin.com/zpdmxyykfgcsz24g', 'https://www.iguopin.com/job/list?keyword=%E5%A4%A7%E6%A8%A1%E5%9E%8B%E5%BA%94%E7%94%A8%E5%BC%80%E5%8F%91']
+  Q: 在猎聘网AI Agent 开发工程师专区找北京的 AI Agent 开发工程师（应届生）岗位，并定制针对性简历。
+Q045 skills=['job-discovery'] role=AI 应用开发工程师 url=['https://www.iguopin.com/job/list?keyword=AI%E5%BA%94%E7%94%A8%E5%BC%80%E5%8F%91']
+  Q: 看看猎聘有没有AI 应用开发工程师（应届生）岗位，最近7天发布的优先。
+Q046 skills=['job-discovery', 'job-matching', 'career-planning'] role=AI 应用开发工程师 url=['https://www.iguopin.com/job/list?keyword=AI%E5%BA%94%E7%94%A8%E5%BC%80%E5%8F%91']
+  Q: 目标岗位限定为AI 应用开发工程师。收集猎聘（中高端招聘平台）最近7天岗位→按匹配度筛选→为胜出岗位给面试建议。
+Q055 skills=['career-planning'] role=AI 应用开发工程师 url=['https://www.iguopin.com/job/list?keyword=AI%E5%BA%94%E7%94%A8%E5%BC%80%E5%8F%91']
+  Q: 针对“AI 应用开发工程师”岗位，给我一份面试准备计划。
+Q081 skills=['job-discovery'] role=AI Agent 开发工程师 url=['https://www.liepin.com/zpdmxyykfgcsz24g', 'https://www.iguopin.com/job/list?keyword=%E5%A4%A7%E6%A8%A1%E5%9E%8B%E5%BA%94%E7%94%A8%E5%BC%80%E5%8F%91']
+  Q: 目标岗位限定为AI Agent 开发工程师。我想找北京的 AI 工程师/大模型应用开发方向（应届生）岗位，请在字节跳动招聘官网搜索并汇总岗位信息。
+Q144 skills=['resume-tailoring'] role=AI Agent 开发工程师 url=['https://www.liepin.com/zpdmxyykfgcsz24g', 'https://www.iguopin.com/job/list?keyword=%E5%A4%A7%E6%A8%A1%E5%9E%8B%E5%BA%94%E7%94%A8%E5%BC%80%E5%8F%91']
+  Q: 针对腾讯的AI Agent 开发工程师（AIGC 方向）岗位，给出简历修改建议（改动点+原因）。
+Q148 skills=['job-discovery', 'job-matching'] role=AI Agent 开发工程师 url=['https://www.liepin.com/zpdmxyykfgcsz24g', 'https://www.iguopin.com/job/list?keyword=%E5%A4%A7%E6%A8%A1%E5%9E%8B%E5%BA%94%E7%94%A8%E5%BC%80%E5%8F%91']
+  Q: 北京的 AI Agent 开发工程师（应届生）岗位有哪些适合我？请在猎聘AI Agent 开发工程师专区（含 AIGC 专场）查找并匹配。
+R001 skills=['job-discovery'] role=央国企 AI 应用/Agent 开发工程师 url=['https://www.iguopin.com/job/list?keyword=AI%E5%BA%94%E7%94%A8%E5%BC%80%E5%8F%91', 'https://career.hebut.edu.cn/correcruit/content/id/78016.html']
+  Q: 目标岗位限定为央国企 AI 应用/Agent 开发工程师。招聘数据源（27届校招内推信息汇总表）中最近1天更新过招聘信息的公司有哪些？请先列出最近1天更新的公司清单，再为其中适合我的公司核实AI 算法/AI 应用方向的校招岗位与投递链接。
+R024 skills=['job-discovery', 'job-matching'] role=AI 应用开发工程师 url=['https://www.iguopin.com/job/list?keyword=AI%E5%BA%94%E7%94%A8%E5%BC%80%E5%8F%91']
+  Q: 猎聘网上找最近7天发布的 AI 应用开发工程师（3 年经验）岗位，筛选出最适合我的一个。
+R025 skills=['job-discovery', 'resume-tailoring'] role=AI 应用开发工程师 url=['https://www.iguopin.com/job/list?keyword=AI%E5%BA%94%E7%94%A8%E5%BC%80%E5%8F%91']
+  Q: 猎聘网上找广州/深圳的AI 应用开发工程师（2 年经验）岗位，并为最匹配的岗位定制针对性简历。
+R043 skills=['job-discovery', 'career-planning'] role=AI 应用开发工程师 url=['https://www.iguopin.com/job/list?keyword=AI%E5%BA%94%E7%94%A8%E5%BC%80%E5%8F%91']
+  Q: 猎聘网找上海 AI 应用开发工程师（3 年经验）岗位，为最匹配的岗位输出面试准备计划。
