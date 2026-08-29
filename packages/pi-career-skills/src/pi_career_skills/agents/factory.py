@@ -1,14 +1,11 @@
-"""Supervisor + per-delegation skill agents (migration plan §4.2).
+"""Per-skill agents for the deterministic skill pipeline (migration §4.2).
 
-Both agent kinds are built on the shared ``pi_coding_agent.CodingAgent``
-SDK wrapper (over ``pi_agent_core.Agent``), always with
-``tool_execution="sequential"`` and the controller hooks wired through.
-
-The supervisor sees ONLY the four ``delegate-<skill>`` tools; the business
-tools are never granted to it (tool_adapter re-checks skill isolation as
-defense in depth anyway).  Each delegation runs a FRESH skill agent with
-exactly its own skill's catalog (from ``CAPABILITY_REGISTRY``) and its
-curated prompt — messages are never shared or reused across delegations.
+Each pipeline node runs a FRESH skill agent built on the shared
+``pi_coding_agent.CodingAgent`` SDK wrapper (over ``pi_agent_core.Agent``),
+always with ``tool_execution="sequential"`` and the controller hooks wired
+through.  A skill agent sees exactly its own skill's catalog (from
+``CAPABILITY_REGISTRY``) and its curated prompt — messages are never shared
+or reused across nodes.
 
 Budgets, evidence promotion and events are NOT wired here; the Phase 7
 controller owns them (including the shared EvidenceStore).
@@ -25,13 +22,11 @@ from ..context import ToolContext
 from ..registry import CAREER_TOOL_REGISTRY, CareerToolRegistry
 from ..tool_adapter import make_agent_tool
 from .capabilities import CAPABILITY_REGISTRY
-from .delegation_tools import DelegationRunner, make_delegation_tool
 from .prompts import (
     CAREER_PLANNING_PROMPT,
     JOB_DISCOVERY_PROMPT,
     JOB_MATCHING_PROMPT,
     RESUME_TAILORING_PROMPT,
-    SUPERVISOR_PROMPT,
     load_archived_skill_prompt,
 )
 
@@ -43,66 +38,8 @@ _SKILL_PROMPTS: dict[str, str] = {
     "career-planning": CAREER_PLANNING_PROMPT,
 }
 
-#: The supervisor may delegate to exactly these skills, in this order.
-_SUPERVISOR_SKILLS: tuple[str, ...] = tuple(CAPABILITY_REGISTRY)
-
 #: Registered definitions — resolves catalog names to ``ToolDefinition``.
 _REGISTRY = CAREER_TOOL_REGISTRY
-
-
-def build_supervisor_agent(
-    model: Model,
-    runner: DelegationRunner | dict[str, DelegationRunner],
-    *,
-    allowed_skills: tuple[str, ...] | None = None,
-    registry: Any = None,
-    stream_fn: Any = None,
-    get_api_key: Any = None,
-    before_tool_call: Any = None,
-    after_tool_call: Any = None,
-    should_stop_after_turn: Any = None,
-) -> CodingAgent:
-    """Build the supervisor agent with delegation tools for allowed skills.
-
-    The agent is a ``pi_coding_agent.CodingAgent`` (the shared SDK wrapper
-    over ``pi_agent_core.Agent``) with ``tool_execution="sequential"`` and
-    the controller hooks wired through.
-
-    When ``allowed_skills`` is ``None`` (default), all four skills are
-    exposed — identical to the historical behavior.  Otherwise only the
-    skills present in *both* ``allowed_skills`` and ``_SUPERVISOR_SKILLS``
-    are included, preserving ``_SUPERVISOR_SKILLS`` order.
-
-    ``runner`` can be either a single ``DelegationRunner`` used for every
-    skill (backward-compatible) or a ``{skill: runner}`` mapping for
-    per-skill runners (useful when each delegation needs its own closure).
-
-    All hook kwargs are optional and default to ``None`` (same as before).
-    ``registry`` is unused for the supervisor (it only sees delegation tools);
-    the parameter is accepted for call-site symmetry with ``build_skill_agent``.
-    """
-    if allowed_skills is None:
-        skills = list(_SUPERVISOR_SKILLS)
-    else:
-        allowed_set = set(allowed_skills)
-        skills = [s for s in _SUPERVISOR_SKILLS if s in allowed_set]
-
-    if isinstance(runner, dict):
-        tools = [make_delegation_tool(s, runner[s]) for s in skills]
-    else:
-        tools = [make_delegation_tool(s, runner) for s in skills]
-
-    return CodingAgent(
-        model=model,
-        system_prompt=SUPERVISOR_PROMPT,
-        tools=tools,
-        tool_execution="sequential",
-        stream_fn=stream_fn,
-        get_api_key=get_api_key,
-        before_tool_call=before_tool_call,
-        after_tool_call=after_tool_call,
-        should_stop_after_turn=should_stop_after_turn,
-    )
 
 
 def build_skill_agent(
@@ -163,6 +100,5 @@ def build_skill_agent(
 
 
 __all__ = [
-    "build_supervisor_agent",
     "build_skill_agent",
 ]

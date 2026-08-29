@@ -554,7 +554,7 @@ def build_career_tool_registry() -> CareerToolRegistry:
 CAREER_TOOL_REGISTRY = build_career_tool_registry()
 
 #: Per-skill catalog — Phase 5 uses this to scope each subagent's tool grant.
-#: job-discovery 11 / job-matching 2 / resume-tailoring 2 / career-planning 2.
+#: job-discovery 13 / job-matching 2 / resume-tailoring 2 / career-planning 2.
 TOOL_CATALOG_BY_SKILL: dict[str, list[str]] = (
     CAREER_TOOL_REGISTRY.catalog_by_skill()
 )

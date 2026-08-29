@@ -14,28 +14,26 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import uuid
-from collections.abc import Callable
-from dataclasses import dataclass, replace
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
-from pi_ai import AssistantMessage, Model, ToolResultMessage
-from pi_coding_agent import CodingAgent
+from pi_ai import AssistantMessage, Model
 
 from ..agents.capabilities import CAPABILITY_REGISTRY, capability_budget_limits
-from ..agents.contracts import AgentTask
-from ..agents.delegation_tools import DelegationOutcome, DelegationRunner
-from ..agents.factory import build_skill_agent, build_supervisor_agent
+from ..agents.contracts import AgentTask, DelegationOutcome
+from ..agents.factory import build_skill_agent
 from ..context import ToolContext
 from ..contracts import RunEvent
 from ..errors import (
     AUTO_RECOVERY_LIMIT_REACHED,
     DELEGATION_SKILL_ALREADY_SUCCEEDED,
     DELEGATION_SKILL_NOT_ALLOWED,
-    INVALID_MODEL_RESPONSE,
     MODEL_API_KEY_MISSING,
     TARGET_EVIDENCE_NOT_FOUND,
     WALL_CLOCK_BUDGET_EXHAUSTED,
     CareerToolError,
+    SkillRetryableError,
     redact_message,
 )
 from ..registry import CAREER_TOOL_REGISTRY
@@ -58,6 +56,57 @@ from .partial_answer import build_partial_answer
 from .recovery import AUTO_RECOVERABLE_REASONS, should_auto_recover
 from .state import RunState, RunStatus, transition
 
+#: Fixed pipeline order — mirrors the capability prerequisite chain.
+SKILL_ORDER: tuple[str, ...] = (
+    "job-discovery",
+    "job-matching",
+    "resume-tailoring",
+    "career-planning",
+)
+
+#: Node statuses that let the pipeline continue to the next skill.
+#: ``partial`` = already succeeded in a previous attempt (routing no-op).
+_CONTINUE_STATUSES = frozenset({"succeeded", "partial"})
+
+
+async def run_pipeline(
+    run_node: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]],
+    *,
+    task: str,
+    needed: set[str],
+    completed: set[str],
+) -> dict[str, Any]:
+    """Run the fixed-order skill pipeline as a plain async loop.
+
+    Replaces the previous LangGraph shell (same routing semantics):
+    ``job-discovery`` always runs first, then each later skill runs only if
+    still needed and not yet completed; a non-continue status stops the
+    pipeline; a ``SkillRetryableError`` node failure is retried once, then the
+    exception propagates to the run loop for the auto-recovery decision.
+    """
+    state: dict[str, Any] = {
+        "task": task,
+        "needed": set(needed),
+        "completed": set(completed),
+        "status": "succeeded",
+        "code": None,
+        "message": None,
+    }
+    for index, skill in enumerate(SKILL_ORDER):
+        if index > 0:
+            if state["status"] not in _CONTINUE_STATUSES:
+                break
+            if skill not in state["needed"] or skill in state["completed"]:
+                continue
+        for attempt in range(2):  # ponytail: retry once per node, as the graph RetryPolicy did
+            try:
+                state.update(await run_node(skill, state))
+                break
+            except SkillRetryableError:
+                if attempt == 1:
+                    raise
+    return state
+
 
 def _delegation_status_for_error(error_code: str) -> str:
     """Map trusted error codes to supervisor-decision states."""
@@ -76,6 +125,10 @@ def _delegation_status_for_error(error_code: str) -> str:
     if error_code in {"needs_user", "manual_review_required"}:
         return "need_user"
     return "failed"
+
+
+#: DelegationStatus → run-level status (the only divergence is the happy path).
+_RUN_STATUS_ALIASES = {"success": "succeeded"}
 
 @dataclass
 class RunRequest:
@@ -223,12 +276,25 @@ class CareerRunController:
                 halt_box=halt_box,
             )
 
-            # Build per-skill runners for delegation.
-            runners: dict[str, DelegationRunner] = {}
+            # Pipeline node bodies: async closures over the shared kernel.
             private_ctx = safe_private_context(request.private_context)
-            for skill in allowed_skills:
-                runners[skill] = self._make_runner_for_skill(
+
+            # Bind the per-attempt kernel handles as defaults: the closure is
+            # invoked by run_pipeline within this same iteration.
+            async def run_node(
+                skill: str,
+                pipeline_state: dict[str, Any],
+                *,
+                tracker=tracker,
+                guard=guard,
+                hooks=hooks,
+                attempt_id=attempt_id,
+                halt_box=halt_box,
+                private_ctx=private_ctx,
+            ) -> dict[str, Any]:
+                return await self._run_pipeline_node(
                     skill=skill,
+                    task_goal=pipeline_state["task"],
                     state=state,
                     store=store,
                     tracker=tracker,
@@ -241,47 +307,20 @@ class CareerRunController:
                     private_context=private_ctx,
                 )
 
-            # Build fresh supervisor via the factory.
-            supervisor = build_supervisor_agent(
-                self._model_for("supervisor"),
-                runners,
-                allowed_skills=allowed_skills,
-                registry=self._registry,
-                stream_fn=hooks.stream_fn,
-                get_api_key=self._get_api_key,
-                before_tool_call=hooks.before_tool_call,
-                after_tool_call=hooks.after_tool_call,
-                should_stop_after_turn=hooks.should_stop_after_turn,
-            )
-
             tracker.mark_attempt_started()
             try:
-                hooks.agent_ref_box[0] = supervisor
-                await asyncio.wait_for(
-                    supervisor.prompt(request.task),
+                final_state = await asyncio.wait_for(
+                    run_pipeline(
+                        run_node,
+                        task=request.task,
+                        needed=needed_skills,
+                        completed=set(state.completed_skills),
+                    ),
                     timeout=max(0.1, tracker.remaining_wall_clock_seconds()),
                 )
 
-                # Continue loop while last message is a tool result and no halt.
-                # Always let the supervisor produce a final text turn after the
-                # last tool call, even if all needed skills are already satisfied
-                # (so the completion policy gets a summary).
-                while (
-                    halt_box[0] is None
-                    and supervisor.state.messages
-                    and isinstance(
-                        supervisor.state.messages[-1], ToolResultMessage
-                    )
-                ):
-                    hooks.agent_ref_box[0] = supervisor
-                    await asyncio.wait_for(
-                        supervisor.continue_(),
-                        timeout=max(0.1, tracker.remaining_wall_clock_seconds()),
-                    )
-
-                # Some pi-agent-core versions suppress the supervisor
-                # callback for legacy terminal delegate results.  Completion
-                # state is authoritative, so retain an auditable event.
+                # Some pi-agent-core versions suppress structured tool results.
+                # Completion state is authoritative, so retain an auditable event.
                 observed_events = event_log.events()
                 if state.completed_skills and not any(
                     event.type.startswith("delegation_")
@@ -298,12 +337,18 @@ class CareerRunController:
                     store=store,
                     tracker=tracker,
                     guard=guard,
-                    supervisor=supervisor,
+                    final=final_state,
                     request=request,
                     event_log=event_log,
                     attempt_id=attempt_id,
                     halt_box=halt_box,
                 )
+            except SkillRetryableError as exc:
+                # Node retries exhausted — the node failure becomes a
+                # run-level waiting_user for the auto-recovery decision.
+                outcome_status = "waiting_user"
+                outcome_code = exc.code
+                outcome_msg = exc.message or "skill retryable failure"
             except TimeoutError:
                 outcome_status = "waiting_user"
                 outcome_code = WALL_CLOCK_BUDGET_EXHAUSTED
@@ -455,13 +500,14 @@ class CareerRunController:
         seed_artifact(store, artifact)
 
     # ------------------------------------------------------------------
-    # Per-skill delegation runner factory
+    # Pipeline node body (one skill delegation per loop iteration)
     # ------------------------------------------------------------------
 
-    def _make_runner_for_skill(
+    async def _run_pipeline_node(
         self,
         *,
         skill: str,
+        task_goal: AgentTask | str,
         state: RunState,
         store: EvidenceStore,
         tracker: BudgetTracker,
@@ -472,68 +518,57 @@ class CareerRunController:
         attempt_id: str,
         halt_box: list[tuple[str, str] | None],
         private_context: dict[str, Any] | None = None,
-    ) -> DelegationRunner:
-        """Build a sync DelegationRunner bound to one specific skill.
+    ) -> dict[str, Any]:
+        """Run one pipeline node: a single skill delegation.
 
-        The runner executes via ``asyncio.to_thread`` in the delegation tool,
-        so it must be a sync callable.  It uses ``asyncio.run`` internally to
-        drive the skill agent loop.
+        Returns the partial pipeline-state update consumed by the next
+        iteration: ``{"completed", "status", "code", "message"}``.
         """
-        captured_private = safe_private_context(private_context)
-        retry_counts: dict[tuple[str, str | None], int] = {}
-
-        def runner(task_goal: AgentTask | str, params: dict[str, Any]) -> DelegationOutcome:
-            event_count = len(event_log.events())
-            outcome = asyncio.run(
-                self._run_skill_delegation(
-                    skill=skill,
-                    task_goal=task_goal,
-                    params=params,
-                    state=state,
-                    store=store,
-                    tracker=tracker,
-                    guard=guard,
-                    event_log=event_log,
-                    hooks=hooks,
-                    allowed_skills=allowed_skills,
-                    attempt_id=attempt_id,
-                    halt_box=halt_box,
-                    private_context=captured_private,
-                )
+        event_count = len(event_log.events())
+        outcome = await self._run_skill_delegation(
+            skill=skill,
+            task_goal=task_goal,
+            state=state,
+            store=store,
+            tracker=tracker,
+            guard=guard,
+            event_log=event_log,
+            hooks=hooks,
+            allowed_skills=allowed_skills,
+            attempt_id=attempt_id,
+            halt_box=halt_box,
+            private_context=private_context,
+        )
+        # pi-agent-core does not invoke ``after_tool_call`` for legacy
+        # terminal tool results.  Record the delegation at this runtime
+        # boundary as a fallback, while avoiding duplicates when the hook
+        # already observed a structured result.
+        new_events = event_log.events()[event_count:]
+        if not any(event.type.startswith("delegation_") for event in new_events):
+            event_log.append(
+                f"delegation_{outcome.status.value}",
+                {
+                    "skill": skill,
+                    "error_code": outcome.error_code or "",
+                },
             )
-            if outcome.status.value == "retryable" and outcome.error_code:
-                retry_key = (skill, outcome.error_code)
-                retry_counts[retry_key] = retry_counts.get(retry_key, 0) + 1
-                if retry_counts[retry_key] >= 2:
-                    # Repeating the same retryable failure without new
-                    # evidence is no longer productive.  Surface BLOCKED so
-                    # the supervisor asks the user or changes route instead
-                    # of spending the run budget in an identical loop.
-                    outcome = replace(
-                        outcome,
-                        status="blocked",
-                        error_code="delegation_retry_limit",
-                        summary=(
-                            outcome.summary
-                            or f"{skill}: repeated {outcome.error_code or 'retryable'} failure"
-                        ),
-                    )
-            # pi-agent-core does not invoke ``after_tool_call`` for legacy
-            # terminal tool results.  Record the delegation at this runtime
-            # boundary as a fallback, while avoiding duplicates when the hook
-            # already observed a structured result.
-            new_events = event_log.events()[event_count:]
-            if not any(event.type.startswith("delegation_") for event in new_events):
-                event_log.append(
-                    f"delegation_{outcome.status.value}",
-                    {
-                        "skill": skill,
-                        "error_code": outcome.error_code or "",
-                    },
-                )
-            return outcome
-
-        return runner
+        # A retryable delegation failure is a node-level throw: the pipeline
+        # loop retries the node once, and once its retries are exhausted the
+        # exception propagates to the run loop for the auto-recovery decision.
+        if outcome.status.value == "retryable":
+            raise SkillRetryableError(
+                outcome.error_code or "retryable",
+                outcome.summary or f"{skill}: retryable skill failure",
+            )
+        # DelegationStatus and the run-level status vocabulary differ only on
+        # the happy path: the pipeline continues on "succeeded", not "success".
+        status = _RUN_STATUS_ALIASES.get(outcome.status.value, outcome.status.value)
+        return {
+            "completed": set(state.completed_skills),
+            "status": status,
+            "code": outcome.error_code,
+            "message": outcome.summary,
+        }
 
     # ------------------------------------------------------------------
     # Skill delegation (async, run inside asyncio.run by the sync runner)
@@ -544,7 +579,6 @@ class CareerRunController:
         *,
         skill: str,
         task_goal: AgentTask | str,
-        params: dict[str, Any],
         state: RunState,
         store: EvidenceStore,
         tracker: BudgetTracker,
@@ -557,7 +591,6 @@ class CareerRunController:
         private_context: dict[str, Any] | None = None,
     ) -> DelegationOutcome:
         """Run one skill delegation — the real skill agent loop."""
-        del params
         task = task_goal if isinstance(task_goal, AgentTask) else AgentTask(objective=task_goal)
 
         # a. Validation (§6.7).
@@ -738,13 +771,13 @@ class CareerRunController:
         store: EvidenceStore,
         tracker: BudgetTracker,
         guard: ToolCallGuard,
-        supervisor: CodingAgent,
+        final: dict[str, Any],
         request: RunRequest,
         event_log: EventLogger,
         attempt_id: str,
         halt_box: list[tuple[str, str] | None],
     ) -> tuple[str, str | None, str | None]:
-        """Determine the attempt outcome after the supervisor driver returns."""
+        """Determine the attempt outcome after the pipeline returns."""
         # A stall may fire immediately after the final durable deliverable is
         # promoted (for example, the supervisor keeps trying to re-delegate
         # after a planning artifact already completed).  Trusted completion
@@ -790,22 +823,11 @@ class CareerRunController:
                 return ("succeeded", None, None)
             return ("waiting_user", halt_box[0][0], halt_box[0][1])
 
-        # Final assistant message stop_reason check.
-        last_msg = (
-            supervisor.state.messages[-1]
-            if supervisor.state.messages
-            else None
-        )
-        if (
-            last_msg is not None
-            and isinstance(last_msg, AssistantMessage)
-            and last_msg.stop_reason in ("error", "aborted")
-        ):
-            return (
-                "waiting_user",
-                INVALID_MODEL_RESPONSE,
-                last_msg.error_message or "invalid model response",
-            )
+        # A retryable node failure never reaches here: the node raised
+        # SkillRetryableError and the run loop converted it to waiting_user.
+        # Controlled failures (blocked / failed / need_user) and a "succeeded"
+        # node without completion evidence fall through to the completion
+        # policy below.
 
         # Matching fallback (§6.6) — deterministic one-shot.
         if _needs_matching_fallback(state, store, request):
@@ -826,9 +848,8 @@ class CareerRunController:
             if matching_completed(store):
                 state.completed_skills.add("job-matching")
 
-        # Extract summary.
-        final_text = _last_assistant_text(supervisor)
-        summary = _bounded_summary(final_text)
+        # Extract summary from the last node's bounded message.
+        summary = _bounded_summary(final.get("message") or "")
         if not summary:
             summary = state.summary
 

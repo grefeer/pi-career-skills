@@ -49,6 +49,7 @@ from pi_career_skills.errors import (
     AUTO_RECOVERY_LIMIT_REACHED,
     BUDGET_EXHAUSTED,
     COMPLETION_EVIDENCE_UNAVAILABLE,
+    DELEGATION_SKILL_ALREADY_SUCCEEDED,
     MODEL_API_KEY_MISSING,
     NO_PROGRESS,
 )
@@ -352,17 +353,6 @@ async def test_success_single_skill(
         FauxScript(
             tool_calls=[
                 ToolCall(
-                    id="s1",
-                    name="delegate-job-discovery",
-                    arguments={"task_goal": "找Java后端岗位"},
-                )
-            ]
-        )
-    )
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
                     id="d1",
                     name="fetch-public-job-pages",
                     arguments={"urls": ["https://example.com/job/1"]},
@@ -382,8 +372,6 @@ async def test_success_single_skill(
         )
     )
     push_script(FauxScript(text="已完成职位发现。"))
-    # Supervisor's final turn (after delegation returns)
-    push_script(FauxScript(text="已为您找到Java后端岗位，详情请见参考资料。"))
 
     result = await controller.run(
         RunRequest(task="帮我找Java后端岗位", needed_skills=("job-discovery",))
@@ -410,17 +398,6 @@ async def test_discovery_projects_new_page_evidence_for_real_extraction_handler(
         FauxScript(
             tool_calls=[
                 ToolCall(
-                    id="s1",
-                    name="delegate-job-discovery",
-                    arguments={"task_goal": "找Java后端岗位"},
-                )
-            ]
-        )
-    )
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
                     id="d1",
                     name="fetch-public-job-pages",
                     arguments={"urls": ["https://example.com/job/1"]},
@@ -440,7 +417,6 @@ async def test_discovery_projects_new_page_evidence_for_real_extraction_handler(
         )
     )
     push_script(FauxScript(text="已完成职位发现。"))
-    push_script(FauxScript(text="已为您找到Java后端岗位。"))
 
     result = await controller.run(
         RunRequest(task="帮我找Java后端岗位", needed_skills=("job-discovery",))
@@ -486,17 +462,6 @@ async def test_seeded_pages_leave_room_for_live_real_extraction() -> None:
         FauxScript(
             tool_calls=[
                 ToolCall(
-                    id="s1",
-                    name="delegate-job-discovery",
-                    arguments={"task_goal": "找Java后端岗位"},
-                )
-            ]
-        )
-    )
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
                     id="d1",
                     name="fetch-public-job-pages",
                     arguments={"urls": ["https://example.com/job/1"]},
@@ -516,7 +481,6 @@ async def test_seeded_pages_leave_room_for_live_real_extraction() -> None:
         )
     )
     push_script(FauxScript(text="职位发现完成。"))
-    push_script(FauxScript(text="已找到岗位。"))
 
     result = await controller.run(
         RunRequest(
@@ -544,9 +508,7 @@ async def test_seeded_pages_leave_room_for_live_real_extraction() -> None:
 async def test_controller_ignores_non_mapping_private_context(
     controller: CareerRunController, private_context: Any
 ) -> None:
-    """Top-level malformed context fails closed before any delegation setup."""
-    push_script(FauxScript(text="请补充职位偏好。"))
-
+    """Top-level malformed context fails closed before any skill runs."""
     result = await controller.run(
         RunRequest(
             task="测试上下文边界",
@@ -570,18 +532,7 @@ async def test_multi_skill(
 ) -> None:
     _reg, counts = stub_registry
 
-    # Turn 1: delegate discovery
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="s1",
-                    name="delegate-job-discovery",
-                    arguments={"task_goal": "找Java岗位"},
-                )
-            ]
-        )
-    )
+    # Node 1: discovery
     push_script(
         FauxScript(
             tool_calls=[
@@ -606,18 +557,7 @@ async def test_multi_skill(
     )
     push_script(FauxScript(text="职位发现完成。"))
 
-    # Turn 2: delegate matching
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="s2",
-                    name="delegate-job-matching",
-                    arguments={"task_goal": "匹配Java岗位"},
-                )
-            ]
-        )
-    )
+    # Node 2: matching
     push_script(
         FauxScript(
             tool_calls=[
@@ -631,18 +571,7 @@ async def test_multi_skill(
     )
     push_script(FauxScript(text="匹配完成。"))
 
-    # Turn 3: delegate tailoring
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="s3",
-                    name="delegate-resume-tailoring",
-                    arguments={"task_goal": "生成简历修改建议"},
-                )
-            ]
-        )
-    )
+    # Node 3: tailoring
     push_script(
         FauxScript(
             tool_calls=[
@@ -658,9 +587,6 @@ async def test_multi_skill(
         )
     )
     push_script(FauxScript(text="简历优化建议已生成。"))
-
-    # Supervisor final
-    push_script(FauxScript(text="三项任务全部完成。"))
 
     result = await controller.run(
         RunRequest(
@@ -692,24 +618,14 @@ async def test_not_allowed_skill(
 ) -> None:
     _reg, counts = stub_registry
 
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="s1",
-                    name="delegate-job-matching",
-                    arguments={"task_goal": "匹配岗位"},
-                )
-            ]
-        )
-    )
-    push_script(FauxScript(text="无法执行。"))
-
+    # The pipeline always starts with job-discovery (allowed, but not needed —
+    # empty script queue yields a no-evidence turn), then routes to the needed
+    # job-matching node, which the delegation guard rejects as not-allowed.
     result = await controller.run(
         RunRequest(
             task="匹配岗位",
             allowed_skills=("job-discovery",),
-            needed_skills=("job-discovery",),
+            needed_skills=("job-matching",),
         )
     )
 
@@ -726,66 +642,28 @@ async def test_not_allowed_skill(
 async def test_already_succeeded_skill(
     controller: CareerRunController, stub_registry: tuple[Any, dict[str, int]]
 ) -> None:
+    """The pipeline never re-routes a completed skill; the delegation guard
+    remains as defense for the unconditional first node across attempts."""
     _reg, counts = stub_registry
 
-    # Turn 1: delegate discovery → succeeds
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="s1",
-                    name="delegate-job-discovery",
-                    arguments={"task_goal": "找岗位"},
-                )
-            ]
-        )
-    )
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="d1",
-                    name="fetch-public-job-pages",
-                    arguments={"urls": ["https://example.com/job/1"]},
-                )
-            ]
-        )
-    )
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="d2",
-                    name="extract-observed-job-details-batch",
-                    arguments={"artifact_ids": ["art-fetch-1"]},
-                )
-            ]
-        )
-    )
-    push_script(FauxScript(text="发现完成。"))
-
-    # Turn 2: delegate discovery again → already_succeeded
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="s2",
-                    name="delegate-job-discovery",
-                    arguments={"task_goal": "再找一些"},
-                )
-            ]
-        )
-    )
-    push_script(FauxScript(text="已完成。"))
-
-    result = await controller.run(
-        RunRequest(task="找岗位", needed_skills=("job-discovery",))
+    state = SimpleNamespace(completed_skills={"job-discovery"})
+    outcome = await controller._run_skill_delegation(
+        skill="job-discovery",
+        task_goal="goal",
+        state=state,
+        store=EvidenceStore(),
+        tracker=object(),
+        guard=object(),
+        event_log=object(),
+        hooks=object(),
+        allowed_skills=("job-discovery",),
+        attempt_id="attempt",
+        halt_box=[None],
     )
 
-    assert result.status == "succeeded"
-    assert result.completed_skills == ["job-discovery"]
-    assert counts["fetch-public-job-pages"] == 1
-    assert counts["extract-observed-job-details-batch"] == 1
+    assert outcome.status.value == "partial"
+    assert outcome.error_code == DELEGATION_SKILL_ALREADY_SUCCEEDED
+    assert counts == {}
 
 
 # ======================================================================
@@ -798,19 +676,9 @@ async def test_missing_evidence(
 ) -> None:
     _reg, counts = stub_registry
 
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="s1",
-                    name="delegate-job-matching",
-                    arguments={"task_goal": "匹配"},
-                )
-            ]
-        )
-    )
-    push_script(FauxScript(text="失败。"))
-
+    # Discovery runs first but produces no evidence (empty script queue);
+    # the matching node is then rejected at its evidence prerequisite, so the
+    # matcher tool never runs and the completion policy hands off.
     result = await controller.run(
         RunRequest(task="匹配", needed_skills=("job-matching",))
     )
@@ -830,17 +698,6 @@ async def test_duplicate_tool_call(
 ) -> None:
     _reg, counts = stub_registry
 
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="s1",
-                    name="delegate-job-discovery",
-                    arguments={"task_goal": "找岗位"},
-                )
-            ]
-        )
-    )
     push_script(
         FauxScript(
             tool_calls=[
@@ -882,8 +739,8 @@ async def test_duplicate_tool_call(
 
     assert counts["fetch-public-job-pages"] == 1
     assert result.status == "succeeded"
-    # 3 real tool calls: delegate + fetch + extract (duplicate is deduped pre-handler)
-    assert result.budget.tool_calls == 3
+    # 2 real tool calls: fetch + extract (duplicate is deduped pre-handler)
+    assert result.budget.tool_calls == 2
 
 
 # ======================================================================
@@ -896,17 +753,6 @@ async def test_hard_stall_no_progress(
 ) -> None:
     _reg, counts = stub_registry
 
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="s1",
-                    name="delegate-job-discovery",
-                    arguments={"task_goal": "找岗位"},
-                )
-            ]
-        )
-    )
     for i in range(9):
         # Each query must be unique — otherwise dedup kicks in before stall.
         push_script(
@@ -940,17 +786,6 @@ async def test_soft_stall_steering(
 ) -> None:
     _reg, counts = stub_registry
 
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="s1",
-                    name="delegate-job-discovery",
-                    arguments={"task_goal": "找岗位"},
-                )
-            ]
-        )
-    )
     for i in range(6):
         # Each query must be unique — otherwise dedup kicks in before stall.
         push_script(
@@ -994,40 +829,21 @@ async def test_turn_budget_exhaustion(
 ) -> None:
     _reg, counts = stub_registry
 
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="s1",
-                    name="delegate-job-discovery",
-                    arguments={"task_goal": "找岗位"},
-                )
-            ]
-        )
-    )
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="d1",
-                    name="fetch-public-job-pages",
-                    arguments={"urls": ["https://example.com/job/1"]},
-                )
-            ]
-        )
-    )
-
+    # agent_turns=0: the first skill-agent prompt turn exhausts the budget
+    # before any tool executes — no deliverable, so the halt is a genuine
+    # hand-off, not a post-completion signal.
     result = await controller.run(
         RunRequest(
             task="找岗位",
             needed_skills=("job-discovery",),
-            budget=BudgetLimits(agent_turns=1),
+            budget=BudgetLimits(agent_turns=0),
         )
     )
 
     assert result.status == "waiting_user"
     assert result.error_code == BUDGET_EXHAUSTED
     assert result.attempt_count == 1
+    assert counts == {}
 
 
 # ======================================================================
@@ -1068,80 +884,22 @@ async def test_wall_clock_exhaustion_auto_recovery(
 # ======================================================================
 
 
-async def test_invalid_model_response_auto_recovery(
+async def test_invalid_model_response_absorbed(
     controller: CareerRunController, stub_registry: tuple[Any, dict[str, int]]
 ) -> None:
+    """A skill-agent model error is absorbed as an ordinary failed turn:
+    no INVALID_MODEL_RESPONSE auto-recovery — the completion policy decides."""
     _reg, _counts = stub_registry
 
     push_script(FauxScript(error="boom"))
-
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="s1",
-                    name="delegate-job-discovery",
-                    arguments={"task_goal": "找岗位"},
-                )
-            ]
-        )
-    )
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="d1",
-                    name="fetch-public-job-pages",
-                    arguments={"urls": ["https://example.com/job/1"]},
-                )
-            ]
-        )
-    )
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="d2",
-                    name="extract-observed-job-details-batch",
-                    arguments={"artifact_ids": ["art-fetch-1"]},
-                )
-            ]
-        )
-    )
-    push_script(FauxScript(text="完成。"))
 
     result = await controller.run(
         RunRequest(task="找岗位", needed_skills=("job-discovery",))
     )
 
-    assert result.status == "succeeded"
-    assert result.attempt_count == 2
-
-
-# ======================================================================
-# 12. Recovery limit reached
-# ======================================================================
-
-
-async def test_recovery_limit_reached(
-    controller: CareerRunController, stub_registry: tuple[Any, dict[str, int]]
-) -> None:
-    _reg, _counts = stub_registry
-
-    for _ in range(3):
-        push_script(FauxScript(error="boom"))
-
-    result = await controller.run(
-        RunRequest(
-            task="找岗位",
-            needed_skills=("job-discovery",),
-            budget=BudgetLimits(auto_recoveries=2),
-        )
-    )
-
     assert result.status == "waiting_user"
-    assert result.error_code == AUTO_RECOVERY_LIMIT_REACHED
-    assert result.attempt_count == 3
+    assert result.error_code == COMPLETION_EVIDENCE_UNAVAILABLE
+    assert result.attempt_count == 1
 
 
 # ======================================================================
@@ -1154,17 +912,6 @@ async def test_matching_fallback(
 ) -> None:
     _reg, counts = stub_registry
 
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="s1",
-                    name="delegate-job-discovery",
-                    arguments={"task_goal": "找岗位"},
-                )
-            ]
-        )
-    )
     push_script(
         FauxScript(
             tool_calls=[
@@ -1188,7 +935,6 @@ async def test_matching_fallback(
         )
     )
     push_script(FauxScript(text="职位发现完成。"))
-    push_script(FauxScript(text="所有工作完成。"))
 
     result = await controller.run(
         RunRequest(
@@ -1215,17 +961,6 @@ async def test_matching_fallback_projects_store_for_real_matcher() -> None:
         FauxScript(
             tool_calls=[
                 ToolCall(
-                    id="s1",
-                    name="delegate-job-discovery",
-                    arguments={"task_goal": "找Java后端岗位"},
-                )
-            ]
-        )
-    )
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
                     id="d1",
                     name="fetch-public-job-pages",
                     arguments={"urls": ["https://example.com/job/1"]},
@@ -1245,7 +980,6 @@ async def test_matching_fallback_projects_store_for_real_matcher() -> None:
         )
     )
     push_script(FauxScript(text="职位发现完成。"))
-    push_script(FauxScript(text="所有工作完成。"))
 
     result = await controller.run(
         RunRequest(
@@ -1310,7 +1044,6 @@ async def test_delegation_refresh_callback_cleanup_preserves_newer_callback(
         await controller._run_skill_delegation(
             skill="job-discovery",
             task_goal="goal",
-            params={},
             state=state,
             store=EvidenceStore(),
             tracker=object(),
@@ -1359,17 +1092,6 @@ async def test_terminal_status_uniqueness(
 ) -> None:
     _reg, counts = stub_registry
 
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="s1",
-                    name="delegate-job-discovery",
-                    arguments={"task_goal": "找岗位"},
-                )
-            ]
-        )
-    )
     push_script(
         FauxScript(
             tool_calls=[
@@ -1449,17 +1171,6 @@ async def test_events_present_and_bounded(
 ) -> None:
     _reg, _counts = stub_registry
 
-    push_script(
-        FauxScript(
-            tool_calls=[
-                ToolCall(
-                    id="s1",
-                    name="delegate-job-discovery",
-                    arguments={"task_goal": "找岗位"},
-                )
-            ]
-        )
-    )
     push_script(
         FauxScript(
             tool_calls=[

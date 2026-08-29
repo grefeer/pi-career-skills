@@ -2,7 +2,7 @@
 
 > **一句话定位**：本项目把「模型循环」和「可信内核」的解耦点全部做成钩子 —— pi-ai / pi-agent-core / pi-coding-agent 提供**钩子插槽**，pi-career-skills 的 `build_controller_hooks` 提供**钩子实现**。模型不知道预算、证据、停滞、交付物门禁的存在；这些全由钩子在被调用的瞬间强制执行。
 >
-> **行号基线**：当前 master（commit `8adcbd6` 之后的工作区状态）。
+> **行号基线**：当前 master（含「supervisor → 确定性流水线 → LangGraph 换纯循环」重构后的工作区状态）。
 
 ---
 
@@ -133,23 +133,23 @@ class ControllerHooks:
     context_refresh_box: list[Callable[[], None] | None]
 ```
 
-**构建入口**：`build_controller_hooks(...)`（agent_hooks.py:114-395），由 controller 在每个 attempt 构建一次。supervisor 用共享的 `tracker`（controller.py:218-224）；每个 skill 子代理用**子预算视图** `child_tracker = tracker.child(child_limits)`（controller.py:623-628，`child_limits` 由 `capability_budget_limits(skill)` 从能力注册表取默认值，[capabilities.py:150](packages/pi-career-skills/src/pi_career_skills/agents/capabilities.py#L150)）——但 `guard` / `store` / `halt_box` 是**全链共享**的（跨 delegation 连续计数、证据互通、halt 状态贯通）。
+**构建入口**：`build_controller_hooks(...)`（agent_hooks.py:114-395）。每个 attempt 先构建**一套 run 级共享钩子**（controller.py:221-227，tracker/guard/store/halt_box 全链共享）；每个技能节点内再用**子预算视图** `child_tracker = tracker.child(child_limits)` 构建一套技能钩子（controller.py:607-619，`child_limits` 由 `capability_budget_limits(skill)` 从能力注册表取默认值，[capabilities.py:150](packages/pi-career-skills/src/pi_career_skills/agents/capabilities.py#L150)）——`guard` / `store` / `halt_box` 在两套钩子间**共享**（跨节点连续计数、证据互通、halt 状态贯通）。
 
 ### 4.1 钩子接线图（谁把钩子交给谁）
 
 ```mermaid
 flowchart TB
     CTRL["CareerRunController.run()<br/>controller.py"] 
-    CTRL -->|"build_controller_hooks<br/>L218-224 / L629-635"| CH["ControllerHooks 闭包<br/>guard/store/halt_box 全链共享<br/>skill 用 child_tracker 子预算"]
-    CH -->|"stream_fn / before / after / should_stop<br/>controller.py:250-254 / 645-649"| FA["build_supervisor_agent / build_skill_agent<br/>factory.py"]
-    FA -->|"五个钩子参数<br/>factory.py:95-104 / 150-161"| CA["CodingAgent<br/>sdk.py"]
+    CTRL -->|"build_controller_hooks<br/>run 级共享 L221-227<br/>技能节点子预算 L613-619"| CH["ControllerHooks 闭包<br/>guard/store/halt_box 全链共享<br/>skill 用 child_tracker 子预算"]
+    CH -->|"stream_fn / before / after / should_stop<br/>controller.py:624-634"| FA["build_skill_agent<br/>factory.py"]
+    FA -->|"五个钩子参数<br/>factory.py:94-98"| CA["CodingAgent<br/>sdk.py"]
     CA -->|"透传<br/>sdk.py:79-93"| AO["AgentOptions<br/>agent.py"]
     AO -->|"执行时回调<br/>agent_loop.py"| LOOP["模型循环"]
-    CH -->|"agent_ref_box[0] = 当前 agent<br/>controller.py:259/276/655"| ARB["软停滞 steering 目标"]
-    CH -->|"context_refresh_box[0] = refresh_callback<br/>controller.py:622/636"| CRB["上下文投影刷新"]
+    CH -->|"agent_ref_box[0] = 当前 agent<br/>controller.py:639"| ARB["软停滞 steering 目标"]
+    CH -->|"context_refresh_box[0] = refresh_callback<br/>controller.py:606/620"| CRB["上下文投影刷新"]
 ```
 
-> **supervisor 与 skill 各有一份 ControllerHooks**（controller.py:218 与 629 各调一次 `build_controller_hooks`），共享同一个 `guard` / `store` / `halt_box`，skill 的预算用 `child_tracker`（父 tracker 的子视图）—— 共享部分保证「跨代理连续计数」（如停滞判定跨 delegation 累计），子预算保证每个技能有独立预算上限。
+> **run 级一套共享钩子 + 每个技能节点一套技能钩子**：共享钩子在每个 attempt 构建一次（controller.py:221-227），技能钩子在 `_run_skill_delegation` 内按节点构建（controller.py:613-619），两套共享同一个 `guard` / `store` / `halt_box`，skill 的预算用 `child_tracker`（父 tracker 的子视图）—— 共享部分保证「跨节点连续计数」（如停滞判定跨节点累计），子预算保证每个技能有独立预算上限。
 
 ---
 
@@ -213,7 +213,7 @@ def before_tool_call(ctx, cancel_event=None):
 
 ### 5.4 `after_tool_call` —— 证据提升 + 停滞 + 软停滞 + 外部失败分类 + 交付物终止（最复杂）
 
-**实现**：agent_hooks.py:208-386。这是本项目业务逻辑最重的钩子，按结果类型分两大分支：
+**实现**：agent_hooks.py:208-386。这是本项目业务逻辑最重的钩子，按结果类型只剩一支（skill 业务工具）：
 
 ```mermaid
 flowchart TD
@@ -229,19 +229,17 @@ flowchart TD
     C1 --> C9["event_log 记录 tool_observation<br/>L342-351"]
     C9 --> C10{"交付物已就绪?<br/>_deliverable_ready"}
     C10 -- "是" --> C11["terminate: True<br/>技能完成即停"]
-    B -- "否 → Case 2: supervisor delegate 工具" --> D1["guard.note_call(delegate-<skill>)<br/>L370-376"]
-    D1 --> D2["event_log 记录 delegation_<status><br/>L377-383"]
 ```
 
 **Case 1（skill 业务工具）关键子机制：**
 
 1. **证据提升**（L225-228）：`store.add_observation(details)` 把工具观察提升为持久化证据；若产出新工件，触发 `context_refresh_box[0]()` 刷新上下文投影。
-2. **外部失败分类**（L238-301）：三类错误码各自有计数 + 阈值（blocked≥2、route≥2、miss≥3），**仅在无可用证据时**升级为 halt —— 有部分证据时让 supervisor 有机会换允许的兜底来源。
+2. **外部失败分类**（L238-301）：三类错误码各自有计数 + 阈值（blocked≥2、route≥2、miss≥3），**仅在无可用证据时**升级为 halt —— 有部分证据时不立即升级 halt，让技能代理有机会切换来源。
 3. **停滞信号**（L303-314）：`guard.note_call` 返回 `repeated_tool_failure` / `soft_stop` 等信号。
 4. **软停滞 steering**（L321-340）：`soft_stop` 且未 steer 过时，通过 `agent_ref_box[0]` 拿到当前 agent，调用 `agent.steer(UserMessage(软停滞收尾语))` —— 这是**钩子通过 steering 队列向运行中的 agent 注入指令**的机制（agent.py:162-164）。
-5. **交付物门禁**（L352-360）：`_deliverable_ready(skill_name, promoted)`（agent_hooks.py:416-457）判定该技能的契约工件是否已产出（如 job-discovery 的 `jd_complete` 页 / 真实候选，job-matching 的 `matches` 非空等），一旦就绪立即 `terminate` —— **技能完成即停，防止模型继续无谓浏览**。
+5. **交付物门禁**（L356-357）：`_deliverable_ready(skill_name, promoted)`（agent_hooks.py:416-457）判定该技能的契约工件是否已产出（如 job-discovery 的 `jd_complete` 页 / 真实候选，job-matching 的 `matches` 非空等），一旦就绪立即 `terminate` —— **技能完成即停，防止模型继续无谓浏览**。
 
-**Case 2（supervisor delegate 工具）**：只记录 `delegate-<skill>` 调用与 `delegation_<status>` 事件，不涉及证据提升。
+**Case 2 已删除**：`delegate-<skill>` 工具随 supervisor 一并移除；`delegation_*` 审计事件现由 `_run_pipeline_node` 在节点边界补记（controller.py:546-554）。
 
 ---
 
@@ -251,8 +249,8 @@ flowchart TD
 
 | 盒子 | 由谁填充 | 由谁读取 | 用途 |
 |---|---|---|---|
-| `agent_ref_box` | controller 在每次驱动 agent 前填 `[agent]`（controller.py:259/276/655） | `after_tool_call` 软停滞分支 | 让钩子拿到**当前活跃 agent** 调 `steer()` |
-| `context_refresh_box` | controller 填 `[refresh_callback]`（controller.py:622/636） | `after_tool_call` 证据提升分支 | 证据变化后刷新上下文投影 |
+| `agent_ref_box` | controller 在驱动技能 agent 前填 `[agent]`（controller.py:639） | `after_tool_call` 软停滞分支 | 让钩子拿到**当前活跃 agent** 调 `steer()` |
+| `context_refresh_box` | controller 填 `[refresh_callback]`（controller.py:606/620） | `after_tool_call` 证据提升分支 | 证据变化后刷新上下文投影 |
 
 > **为什么用可变盒子而非参数传递**：钩子闭包在 `build_controller_hooks` 时创建，而 agent 在之后才构建。盒子让「先有钩子、后有 agent」的时序成立 —— 钩子执行时从盒子里取当前 agent 的引用。
 
@@ -264,7 +262,7 @@ flowchart TD
 |---|---|---|
 | `transform_context` / `convert_to_llm` | agent.py:84-85 | 上下文投影用 `context_refresh_box` 实现，不需要改写发给模型的 message |
 | `prepare_next_turn` | agent.py:90 | 框架备用插槽，本项目无此需求 |
-| `pi_ai.RetryCallbacks`（on_retry_scheduled / on_retry_attempt_start / on_retry_finished） | pi-ai/retry.py:126-131 | pi-ai 的重试回调面向**传输层重试**；本项目的「重试」是**编排层**的 attempt 循环（controller.py:504-520 的 `retry_counts` 去重上限），由 controller 自己管理，不经过 pi-ai 的 `retry_assistant_call` |
+| `pi_ai.RetryCallbacks`（on_retry_scheduled / on_retry_attempt_start / on_retry_finished） | pi-ai/retry.py:126-131 | pi-ai 的重试回调面向**传输层重试**；本项目的重试分两层：**节点级重试**（`run_pipeline` controller.py:101-105 对抛 `SkillRetryableError` 的节点重试一次，等价于旧图节点级 `RetryPolicy(max_attempts=2)`）——retryable 节点失败 raise `SkillRetryableError`（controller.py:558-562），循环重试一次，耗尽后冒泡到 run 循环转 waiting_user（controller.py:346-351）交 **run 级 attempt 自动恢复循环**——不经过 pi-ai 的 `retry_assistant_call` |
 | `Agent.subscribe(listener)` 事件订阅 | agent.py:150-158 | 事件日志走 controller 自己的 `EventLogger`，不订阅 agent 事件（`EventLogger` 的订阅通道本身也已在后续重构中删除，只剩 `append` / `events`） |
 | 工具执行的 `cancel_event` / `on_update` | agent_loop.py:534 | tool_adapter.execute 接受但忽略（tool_adapter.py:291-296）——处理函数是短同步函数，取消/更新由 run 级 harness 负责 |
 
@@ -304,12 +302,13 @@ sequenceDiagram
 
 | 测试文件 | 覆盖内容 |
 |---|---|
-| [test_agent_scoping.py](packages/pi-career-skills/tests/test_agent_scoping.py) | 钩子经 CodingAgent 正确接线；supervisor/skill 各自 scoping |
+| [test_agent_scoping.py](packages/pi-career-skills/tests/test_agent_scoping.py) | 技能 agent 经 CodingAgent 正确接线；每技能只挂自己目录 + read-skill-reference |
 | [test_budgets.py](packages/pi-career-skills/tests/test_budgets.py) | `stream_fn`/`before_tool_call` 的预算扣费、墙钟、重复拦截 |
 | [test_recovery.py](packages/pi-career-skills/tests/test_recovery.py) | 外部失败分类、halt 后自动恢复、attempt 循环 |
 | [test_state_events.py](packages/pi-career-skills/tests/test_state_events.py) | 状态机（transition / 终态）与事件日志（有界载荷、快照、run/attempt id） |
 | [test_completion.py](packages/pi-career-skills/tests/test_completion.py) | `_deliverable_ready` 交付物门禁 |
 | [test_controller.py](packages/pi-career-skills/tests/test_controller.py) | 控制器整链接线、软停滞 steering（`stall_soft_warning`）、agent_ref_box/context_refresh_box |
+| [test_pipeline.py](packages/pi-career-skills/tests/test_pipeline.py) | 流水线循环路由顺序与每节点一次重试语义 |
 | [test_browse_tools.py](packages/pi-career-skills/tests/test_browse_tools.py) | P1/P2 工具经钩子链路的证据提升与终止行为 |
 
 ---
@@ -322,6 +321,7 @@ sequenceDiagram
 | [agent_loop.py](packages/pi-agent-core/src/pi_agent_core/agent_loop.py) | 钩子调用点：stream/get_api_key（L291-311）、should_stop（L228-242）、before（L488-516）、after（L537-560） |
 | [sdk.py](packages/pi-coding-agent/src/pi_coding_agent/sdk.py#L50-L94) | CodingAgent 透传层 |
 | [agent_hooks.py](packages/pi-career-skills/src/pi_career_skills/runtime/agent_hooks.py) | **业务钩子唯一实现**（`build_controller_hooks` + `ControllerHooks`） |
-| [factory.py](packages/pi-career-skills/src/pi_career_skills/agents/factory.py#L53-L162) | supervisor/skill agent 接线 |
-| [controller.py](packages/pi-career-skills/src/pi_career_skills/runtime/controller.py) | 钩子装配（L218-255）、skill 子钩子（L622-650）、get_api_key 默认解析（L917-927）、编排层重试（L483-534） |
+| [factory.py](packages/pi-career-skills/src/pi_career_skills/agents/factory.py#L45-L99) | skill agent 接线（仅 `build_skill_agent`） |
+| [controller.py](packages/pi-career-skills/src/pi_career_skills/runtime/controller.py) | 共享钩子（L271-277）、技能钩子（L662-668）、get_api_key 默认解析（L938-948）、`run_pipeline` 节点级重试（L101-105） |
+| ~~runtime/graph.py~~（已删除） | 已被 controller.py 顶部的 `SKILL_ORDER`（L60-65）+ `run_pipeline`（L72-108）纯循环替换，`langgraph` 依赖随之移除 |
 | [tool_adapter.py](packages/pi-career-skills/src/pi_career_skills/tool_adapter.py#L284-L296) | 工具执行钩子（cancel/update 接受不用） |

@@ -8,84 +8,20 @@ from pi_career_skills.agents.capabilities import CAPABILITY_REGISTRY
 from pi_career_skills.agents.contracts import (
     AgentTask,
     ArtifactRef,
-    DelegationAction,
     DelegationOutcome,
     DelegationStatus,
-    normalize_agent_task,
 )
-from pi_career_skills.agents.delegation_tools import make_delegation_tool
 from pi_career_skills.agents.prompts import load_archived_skill_prompt
 from pi_career_skills.errors import CareerToolError
 from pi_career_skills.runtime.budgets import BudgetLimits, BudgetTracker, ToolCallGuard
 
 
-def test_structured_task_keeps_only_evidence_references() -> None:
-    task = normalize_agent_task(
-        {
-            "objective": "匹配 Java 后端岗位",
-            "input_refs": [
-                {
-                    "artifact_id": "art-1",
-                    "source_url": "https://example.com/job/1",
-                    "content_hash": "hash-1",
-                }
-            ],
-            "constraints": {"locations": ["北京"]},
-            "expected_output": {"artifact_type": "job_matching_report"},
-        }
-    )
-
-    assert isinstance(task, AgentTask)
-    assert task.objective == "匹配 Java 后端岗位"
-    assert task.input_refs == (
-        ArtifactRef(
-            artifact_id="art-1",
-            source_url="https://example.com/job/1",
-            content_hash="hash-1",
-        ),
-    )
-    assert task.constraints == {"locations": ["北京"]}
-    assert task.expected_output is not None
-    assert task.expected_output.artifact_type == "job_matching_report"
-    assert "visible_text" not in repr(task)
-
-
-def test_legacy_task_goal_is_normalized_without_breaking_callers() -> None:
-    task = normalize_agent_task({"task_goal": "找 Java 岗位"})
-
+def test_agent_task_is_a_bare_stripped_objective() -> None:
+    task = AgentTask(objective="  找 Java 岗位  ")
     assert task.objective == "找 Java 岗位"
-    assert task.input_refs == ()
-    assert task.expected_output is None
-
-
-def test_structured_task_rejects_unknown_fields_and_empty_objective() -> None:
-    with pytest.raises(ValueError, match="unknown task fields"):
-        normalize_agent_task({"objective": "找岗位", "jd_text": "私有副本"})
-
+    assert task.to_dict() == {"objective": "找 Java 岗位"}
     with pytest.raises(ValueError, match="objective"):
-        normalize_agent_task({"objective": "  "})
-
-
-@pytest.mark.parametrize(
-    ("raw_status", "status", "action"),
-    [
-        ("success", DelegationStatus.SUCCESS, DelegationAction.CONTINUE),
-        ("partial", DelegationStatus.PARTIAL, DelegationAction.REROUTE),
-        ("need_user", DelegationStatus.NEED_USER, DelegationAction.ASK_USER),
-        ("retryable", DelegationStatus.RETRYABLE, DelegationAction.RETRY),
-        ("blocked", DelegationStatus.BLOCKED, DelegationAction.REROUTE),
-        ("failed", DelegationStatus.FAILED, DelegationAction.STOP),
-    ],
-)
-def test_outcome_has_six_states_and_deterministic_action(
-    raw_status: str,
-    status: DelegationStatus,
-    action: DelegationAction,
-) -> None:
-    outcome = DelegationOutcome(skill="job-matching", status=raw_status)
-
-    assert outcome.status is status
-    assert outcome.action is action
+        AgentTask(objective="   ")
 
 
 def test_legacy_outcome_statuses_are_adapted_at_boundary() -> None:
@@ -153,42 +89,21 @@ def test_matching_accepts_complete_public_page_without_structured_projection() -
     assert _skill_has_evidence("job-matching", Store())
 
 
-@pytest.mark.asyncio
-async def test_delegate_tool_accepts_structured_task_and_returns_safe_refs() -> None:
-    captured: list[AgentTask] = []
-
-    def runner(task: AgentTask, params: dict[str, object]) -> DelegationOutcome:
-        del params
-        captured.append(task)
-        return DelegationOutcome(
-            skill="job-matching",
-            status=DelegationStatus.SUCCESS,
-            summary="排序完成",
-            refs=(ArtifactRef(artifact_id="report-1", content_hash="hash-1"),),
-        )
-
-    tool = make_delegation_tool("job-matching", runner)
-    result = await tool.execute(
-        "call-1",
-        {
-            "objective": "匹配岗位",
-            "input_refs": [{"artifact_id": "jd-1", "content_hash": "jd-hash"}],
-            "constraints": {"max_results": 3},
-            "expected_output": {"artifact_type": "job_matching_report"},
-        },
-        None,
-        None,
+def test_outcome_safe_refs_project_only_evidence_handles() -> None:
+    """The delegation boundary projects only safe evidence refs outward."""
+    outcome = DelegationOutcome(
+        skill="job-matching",
+        status=DelegationStatus.SUCCESS,
+        summary="排序完成",
+        refs=(
+            ArtifactRef(artifact_id="report-1", content_hash="hash-1"),
+            {"artifact_id": "jd-1", "source_url": "https://example.com/job/1"},
+        ),
     )
-
-    assert captured[0].objective == "匹配岗位"
-    assert captured[0].input_refs[0].artifact_id == "jd-1"
-    assert result.details == {
-        "skill": "job-matching",
-        "status": "success",
-        "action": "continue",
-        "refs": [{"artifact_id": "report-1", "content_hash": "hash-1"}],
-    }
-    assert result.terminate is False
+    assert outcome.safe_refs() == [
+        {"artifact_id": "report-1", "content_hash": "hash-1"},
+        {"artifact_id": "jd-1", "source_url": "https://example.com/job/1"},
+    ]
 
 
 def test_child_budget_is_bounded_and_charges_parent() -> None:

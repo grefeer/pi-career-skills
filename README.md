@@ -53,6 +53,18 @@ python main.py
 - **25 题评测集**（[eval_results/questions/normalized/](eval_results/questions/normalized/)）：覆盖四技能 + 多步链式（chain）任务，含审计（audit）逐条核对证据与交付物。
 - **评测 CLI**：`pi_career_skills.evaluation.cli` 支持单进程顺序执行（`--workers 1`）、审计、结果对比，每条记录原子写入 `<out>/<qid>.json`。
 
+#### 最新评测结果（2026-08-29）
+
+在最小实现重构（流水线 LangGraph → 纯循环）后复跑 25 题评测集，结果见 [eval_results/manifest25_20260828_222711/](eval_results/manifest25_20260828_222711/)：
+
+| 指标 | 值 |
+|---|---|
+| 模型 / 并发 | `deepseek-v4-flash`，4 workers（playwright fallback） |
+| 退出码 | 0（无崩溃，25/25 全部落盘） |
+| 终态 | `succeeded` 27 个节点（17 题完全成功）；`waiting_user` 8 个节点 |
+
+`waiting_user` 为受控收尾而非失败，保留原始状态：`completion_evidence_unavailable` ×4（C008, C014, Q046, R024）、`no_progress` ×3（C015, Q040, Q045）、`budget_exhausted` ×1（R025）。
+
 ### 学习文档
 
 [`docs/study/pi-career-skills/`](docs/study/pi-career-skills/)：教案、架构对照、[hook 体系全景](docs/study/pi-career-skills/hook体系全景.md)（含 mermaid 图）、一次完整请求的旅程、run 方法调用流程图、五个维度分析（目标边界 / 感知记忆 / 工具生态 / 稳健性 / 评估闭环）。

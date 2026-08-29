@@ -83,6 +83,16 @@ class CareerToolError(Exception):
         self.message = message
 
 
+class SkillRetryableError(CareerToolError):
+    """Raised by a pipeline node when its skill delegation is retryable.
+
+    The pipeline loop retries the node once on this exception; once the node's
+    retry budget is exhausted it propagates to the run loop, which converts it
+    back into a ``waiting_user`` outcome for the run-level auto-recovery
+    decision.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Message redaction
 # ---------------------------------------------------------------------------
@@ -170,8 +180,9 @@ __all__ = [
     "WECHAT_OCR_DISABLED",
     # Sets
     "BLOCKED_ERROR_CODES",
-    # Exception
+    # Exceptions
     "CareerToolError",
+    "SkillRetryableError",
     # Functions
     "redact_message",
 ]
